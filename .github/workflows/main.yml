@@ -12,7 +12,7 @@ jobs:
       - name: Configure Core RDP Settings
         shell: pwsh
         run: |
-          # Enable Remote Desktop
+          # Enable RDP
           Set-ItemProperty `
             -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
             -Name "fDenyTSConnections" -Value 0 -Force
@@ -26,7 +26,7 @@ jobs:
             -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
             -Name "SecurityLayer" -Value 0 -Force
 
-          # Firewall rule
+          # Firewall
           netsh advfirewall firewall delete rule name="RDP-Tailscale" || echo "No old rule"
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
 
@@ -35,12 +35,19 @@ jobs:
       - name: Create RDP User
         shell: pwsh
         run: |
-          $password = "RDP1@$(Get-Random -Maximum 9999)"
+          # Strong password (Windows policy safe)
+          $password = "Rdp@1234!Ab"
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
-          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
+            Remove-LocalUser -Name "RDP"
           }
+
+          New-LocalUser `
+            -Name "RDP" `
+            -Password $securePass `
+            -AccountNeverExpires `
+            -PasswordNeverExpires
 
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
@@ -76,6 +83,7 @@ jobs:
           Write-Host "PASSWORD    : $env:RDP_PASS"
           Write-Host "=============================="
 
+          # Keep runner alive
           while ($true) {
             Start-Sleep 300
           }
