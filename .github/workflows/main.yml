@@ -1,0 +1,81 @@
+name: RDPon
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Configure Core RDP Settings
+        shell: pwsh
+        run: |
+          # Enable Remote Desktop
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name "fDenyTSConnections" -Value 0 -Force
+
+          # Disable NLA
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name "UserAuthentication" -Value 0 -Force
+
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name "SecurityLayer" -Value 0 -Force
+
+          # Firewall rule
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" || echo "No old rule"
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+
+          Restart-Service TermService -Force
+
+      - name: Create RDP User
+        shell: pwsh
+        run: |
+          $password = "RDP1@$(Get-Random -Maximum 9999)"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+
+          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
+            New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          }
+
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+
+          echo "RDP_USER=RDP" >> $env:GITHUB_ENV
+          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
+
+      - name: Install Tailscale
+        shell: pwsh
+        run: |
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $path = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest $url -OutFile $path
+          Start-Process msiexec.exe -ArgumentList "/i `"$path`" /quiet /norestart" -Wait
+
+      - name: Connect Tailscale
+        shell: pwsh
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
+            --hostname=gh-rdp-$env:GITHUB_RUN_ID
+
+          Start-Sleep 10
+          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+
+      - name: Show RDP Details
+        shell: pwsh
+        run: |
+          Write-Host "=============================="
+          Write-Host "RDP ADDRESS : $env:TAILSCALE_IP"
+          Write-Host "USERNAME    : $env:RDP_USER"
+          Write-Host "PASSWORD    : $env:RDP_PASS"
+          Write-Host "=============================="
+
+          while ($true) {
+            Start-Sleep 300
+          }
