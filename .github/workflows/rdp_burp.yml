@@ -31,20 +31,20 @@ jobs:
           echo "RDP_USER=$user" >> $env:GITHUB_ENV
           echo "RDP_PASS=$pass" >> $env:GITHUB_ENV
 
-      - name: Install Burp Suite Community (FIXED)
+      - name: Install Burp Suite Community (WINDOWS EXE)
         shell: pwsh
         run: |
-          $burpUrl = "https://portswigger-cdn.net/burp/releases/download?product=community&version=2024.12.1&type=zip"
-          $zipPath = "$env:TEMP\burp.zip"
-          $installDir = "C:\BurpSuite"
+          $url = "https://portswigger-cdn.net/burp/releases/download?product=community&version=2024.12.1&type=WindowsX64"
+          $exe = "$env:TEMP\burpsuite.exe"
 
-          Invoke-WebRequest $burpUrl -OutFile $zipPath
-          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-          Expand-Archive $zipPath -DestinationPath $installDir -Force
+          Invoke-WebRequest $url -OutFile $exe
 
-          # Public Desktop (exists even before login)
+          # Silent install
+          Start-Process $exe -ArgumentList "-q" -Wait
+
+          # Desktop shortcut (Public Desktop)
           $desktop = "C:\Users\Public\Desktop"
-          $target = "$installDir\BurpSuiteCommunity\BurpSuiteCommunity.exe"
+          $target = "C:\Program Files\BurpSuiteCommunity\BurpSuiteCommunity.exe"
 
           $wsh = New-Object -ComObject WScript.Shell
           $shortcut = $wsh.CreateShortcut("$desktop\Burp Suite Community.lnk")
