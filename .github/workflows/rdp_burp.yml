@@ -1,4 +1,4 @@
-name: RDPburf0
+name: RDPon
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
           echo "RDP_USER=$user" >> $env:GITHUB_ENV
           echo "RDP_PASS=$pass" >> $env:GITHUB_ENV
 
-      - name: Install Burp Suite Community (Preinstalled)
+      - name: Install Burp Suite Community (FIXED)
         shell: pwsh
         run: |
           $burpUrl = "https://portswigger-cdn.net/burp/releases/download?product=community&version=2024.12.1&type=zip"
@@ -42,7 +42,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $installDir | Out-Null
           Expand-Archive $zipPath -DestinationPath $installDir -Force
 
-          $desktop = "C:\Users\RDP\Desktop"
+          # Public Desktop (exists even before login)
+          $desktop = "C:\Users\Public\Desktop"
           $target = "$installDir\BurpSuiteCommunity\BurpSuiteCommunity.exe"
 
           $wsh = New-Object -ComObject WScript.Shell
