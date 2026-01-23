@@ -39,7 +39,7 @@ jobs:
       - name: MediaFire Download Attempt
         shell: pwsh
         run: |
-          $url = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?download=1"
+          $url = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?download=1&dkey=sxypa9bfpor&r=1120"
           $out = "C:\Users\Public\Desktop\XDumpGO.rar"
 
           try {
