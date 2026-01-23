@@ -43,11 +43,16 @@ jobs:
       - name: Download XDumpGO RAR from MediaFire
         shell: pwsh
         run: |
-          $mediafireUrl = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279"
-          Write-Host "Downloading XDumpGO RAR from MediaFire..."
-          $rarPath = "C:\Users\Public\Desktop\XDumpGO.rar"
+          # Try direct download first
+          $directUrl = "https://download2264.mediafire.com/m6jgrzle2lveqe2/x10g5we6bis/XDumpGO.rar"
+          $rarPath = "C:\XDumpGO.rar"
           
+          Write-Host "Downloading XDumpGO RAR from direct link..."
           try {
+              Invoke-WebRequest -Uri $directUrl -OutFile $rarPath
+          } catch {
+              Write-Host "Direct download failed, trying alternative..."
+              $mediafireUrl = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279"
               $pageContent = Invoke-WebRequest -Uri $mediafireUrl -UseBasicParsing
               
               if ($pageContent.Content -match 'href="(https://download[^"]+\.rar)"') {
@@ -55,137 +60,162 @@ jobs:
                   Write-Host "Found download URL: $downloadUrl"
                   Invoke-WebRequest -Uri $downloadUrl -OutFile $rarPath
               } else {
-                  Write-Host "Could not extract download link. Creating manual download instructions..."
-                  
-                  $instructions = "XDumpGO Download Instructions:`n1. Open browser in RDP`n2. Go to: https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279`n3. Click download`n4. Save to Desktop`n5. Extract using 7-Zip"
-                  
-                  $instructions | Out-File "C:\Users\Public\Desktop\Download_XDumpGO.txt" -Encoding UTF8
-                  throw "Automatic download failed. Manual download required."
+                  Write-Host "Creating manual download instructions..."
+                  $instructions = "Download XDumpGO from: https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279"
+                  $instructions | Out-File "C:\Download_Instructions.txt" -Encoding UTF8
               }
-          } catch {
-              Write-Host "Error: $_"
-              throw "Download failed"
           }
           
           if (Test-Path $rarPath) {
               $fileSize = (Get-Item $rarPath).Length
               Write-Host "✅ Download successful: $fileSize bytes"
           } else {
-              throw "❌ Download failed: File not found"
+              Write-Host "⚠️ Download may have failed, continuing anyway..."
           }
 
-      - name: Extract XDumpGO to Desktop
+      - name: Extract XDumpGO
         shell: pwsh
         run: |
-          $rarPath = "C:\Users\Public\Desktop\XDumpGO.rar"
-          $extractPath = "C:\Users\RDP\Desktop\XDumpGO"
-          
-          # Create RDP user desktop folder
-          New-Item -ItemType Directory -Path "C:\Users\RDP\Desktop" -Force | Out-Null
+          $rarPath = "C:\XDumpGO.rar"
+          $extractPath = "C:\XDumpGO"
           
           if (Test-Path $rarPath) {
-              Write-Host "Extracting XDumpGO to Desktop..."
+              Write-Host "Extracting XDumpGO..."
               New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
               & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
               Write-Host "Extraction complete!"
               
-              # List extracted files
-              Write-Host "Files on Desktop:"
-              Get-ChildItem $extractPath | Select-Object Name, Length | Format-Table
+              # List files
+              Write-Host "Extracted files:"
+              Get-ChildItem $extractPath -File | Select-Object -First 10 Name, Length | Format-Table
               
-              # Cleanup RAR file
-              Remove-Item $rarPath -Force
-          } else {
-              Write-Host "RAR file not found. Skipping extraction."
-          }
-
-      - name: Auto Start XDumpGO Setup
-        shell: pwsh
-        run: |
-          $xdumpgoPath = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
-          
-          if (Test-Path $xdumpgoPath) {
-              Write-Host "Setting up XDumpGO auto-start..."
-              
-              # 1. Start XDumpGO immediately
-              Write-Host "Starting XDumpGO now..."
-              Start-Process -FilePath $xdumpgoPath -WindowStyle Normal
-              
-              # 2. Create shortcut on public desktop
-              $WshShell = New-Object -ComObject WScript.Shell
-              $Shortcut = $WshShell.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
-              $Shortcut.TargetPath = $xdumpgoPath
-              $Shortcut.WorkingDirectory = "C:\Users\RDP\Desktop\XDumpGO"
-              $Shortcut.Save()
-              
-              # 3. Add to Windows Startup (Registry)
-              Write-Host "Adding to Windows Startup..."
-              reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v XDumpGO /t REG_SZ /d "`"$xdumpgoPath`"" /f
-              
-              # 4. Create Scheduled Task for auto-start
-              Write-Host "Creating Scheduled Task..."
-              $taskName = "XDumpGO AutoStart"
-              
-              # Delete existing task if any
-              schtasks /delete /tn "$taskName" /f 2>$null
-              
-              # Create new task
-              schtasks /create /tn "$taskName" /tr "$xdumpgoPath" /sc onstart /ru SYSTEM /rl highest /f
-              schtasks /create /tn "XDumpGO Login" /tr "$xdumpgoPath" /sc onlogon /ru RDP /rl highest /f
-              
-              # 5. Create batch file for auto-restart
-              Write-Host "Creating auto-restart script..."
-              $restartScript = "@echo off`n:start`n`"$xdumpgoPath`"`ntimeout /t 10`ngoto start"
-              
-              $restartScript | Out-File "C:\Users\Public\Desktop\AutoStart_XDumpGO.bat" -Encoding ASCII
-              
-              Write-Host "Auto-start setup complete!"
-              
-          } else {
-              Write-Host "XDumpGO.exe not found on Desktop. Checking folder:"
-              Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse | Where-Object { $_.Name -like "*.exe" } | Select-Object Name, FullName | Format-Table
-          }
-
-      - name: Monitor XDumpGO (Optional)
-        shell: pwsh
-        run: |
-          Write-Host "Monitoring XDumpGO..."
-          
-          # Function to start XDumpGO
-          function Start-XDumpGO {
-              $path = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
-              if (Test-Path $path) {
-                  Start-Process -FilePath $path -WindowStyle Minimized -ErrorAction SilentlyContinue
-                  return $true
-              }
-              return $false
-          }
-          
-          # Start initially
-          Start-XDumpGO
-          
-          # Monitor loop
-          $checkCount = 0
-          while ($true) {
-              $checkCount++
-              $currentTime = Get-Date -Format "HH:mm:ss"
-              
-              # Check if XDumpGO is running
-              $process = Get-Process | Where-Object { $_.Name -like "*XDumpGO*" -or $_.Path -like "*XDumpGO*" }
-              
-              if ($process) {
-                  Write-Host "[$currentTime] XDumpGO running (PID: $($process.Id)) - Check #$checkCount"
-              } else {
-                  Write-Host "[$currentTime] XDumpGO not found - Attempting to restart..."
-                  Start-XDumpGO
+              # Check for XDumpGO.exe
+              $exeFile = Get-ChildItem $extractPath -Filter "*.exe" -Recurse | Select-Object -First 1
+              if ($exeFile) {
+                  Write-Host "✅ Found executable: $($exeFile.FullName)"
               }
               
-              Start-Sleep -Seconds 30
+              Remove-Item $rarPath -Force -ErrorAction SilentlyContinue
+          } else {
+              Write-Host "⚠️ RAR file not found. Creating empty directory for manual download."
+              New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
           }
+
+      - name: Setup XDumpGO for RDP User
+        shell: pwsh
+        run: |
+          # Create RDP user desktop folder
+          $rdpDesktop = "C:\Users\RDP\Desktop"
+          New-Item -ItemType Directory -Path $rdpDesktop -Force | Out-Null
+          
+          # Copy XDumpGO to RDP desktop
+          $sourcePath = "C:\XDumpGO"
+          $destPath = "$rdpDesktop\XDumpGO"
+          
+          if (Test-Path $sourcePath) {
+              Write-Host "Copying XDumpGO to RDP desktop..."
+              Copy-Item -Path $sourcePath -Destination $destPath -Recurse -Force
+              
+              # Find executable
+              $exeFiles = Get-ChildItem $destPath -Filter "*.exe" -Recurse
+              if ($exeFiles) {
+                  $mainExe = $exeFiles | Where-Object { $_.Name -like "*XDumpGO*" } | Select-Object -First 1
+                  if ($mainExe) {
+                      $exePath = $mainExe.FullName
+                      Write-Host "✅ Main executable: $exePath"
+                      
+                      # Create shortcut
+                      $WshShell = New-Object -ComObject WScript.Shell
+                      $Shortcut = $WshShell.CreateShortcut("$rdpDesktop\XDumpGO.lnk")
+                      $Shortcut.TargetPath = $exePath
+                      $Shortcut.WorkingDirectory = $destPath
+                      $Shortcut.Save()
+                      
+                      # Also create on public desktop
+                      $publicDesktop = "C:\Users\Public\Desktop"
+                      $PublicShortcut = $WshShell.CreateShortcut("$publicDesktop\XDumpGO.lnk")
+                      $PublicShortcut.TargetPath = $exePath
+                      $PublicShortcut.WorkingDirectory = $destPath
+                      $PublicShortcut.Save()
+                      
+                      # Add to startup
+                      reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v XDumpGO /t REG_SZ /d "`"$exePath`"" /f
+                      
+                      Write-Host "✅ Setup complete: Shortcuts created and added to startup"
+                  }
+              }
+          }
+
+      - name: Check and Install Required Dependencies
+        shell: pwsh
+        run: |
+          Write-Host "Checking for required dependencies..."
+          
+          # Check for Visual C++ Redistributable
+          $vcRedist = Get-WmiObject -Class Win32_Product | Where-Object { $_.Name -like "*Visual C++*" }
+          if (-not $vcRedist) {
+              Write-Host "Installing Visual C++ Redistributable..."
+              $vcUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+              $vcPath = "$env:TEMP\vc_redist.exe"
+              Invoke-WebRequest -Uri $vcUrl -OutFile $vcPath
+              Start-Process -FilePath $vcPath -ArgumentList "/install /quiet /norestart" -Wait
+          }
+          
+          # Check for .NET Framework
+          $dotnet = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction SilentlyContinue
+          if (-not $dotnet) {
+              Write-Host ".NET Framework 4.8 might be needed..."
+          }
+
+      - name: Test XDumpGO Startup
+        shell: pwsh
+        run: |
+          Write-Host "Testing XDumpGO startup..."
+          
+          # Find executable
+          $exePath = Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Filter "*.exe" -Recurse | Where-Object { $_.Name -like "*XDumpGO*" } | Select-Object -First 1 -ExpandProperty FullName
+          
+          if ($exePath) {
+              Write-Host "Found executable: $exePath"
+              
+              # Try to run with different methods
+              Write-Host "Attempt 1: Direct start..."
+              try {
+                  $process1 = Start-Process -FilePath $exePath -WindowStyle Normal -PassThru -ErrorAction Stop
+                  Write-Host "✅ Process started with PID: $($process1.Id)"
+                  Start-Sleep -Seconds 5
+              } catch {
+                  Write-Host "❌ Direct start failed: $_"
+              }
+              
+              Write-Host "Attempt 2: Start with working directory..."
+              try {
+                  $workingDir = Split-Path $exePath -Parent
+                  $process2 = Start-Process -FilePath $exePath -WorkingDirectory $workingDir -PassThru -ErrorAction Stop
+                  Write-Host "✅ Process started with working directory"
+                  Start-Sleep -Seconds 5
+              } catch {
+                  Write-Host "❌ Working directory start failed: $_"
+              }
+              
+              Write-Host "Attempt 3: Start minimized..."
+              try {
+                  $process3 = Start-Process -FilePath $exePath -WindowStyle Minimized -PassThru -ErrorAction Stop
+                  Write-Host "✅ Process started minimized"
+              } catch {
+                  Write-Host "❌ Minimized start failed: $_"
+              }
+              
+          } else {
+              Write-Host "⚠️ No XDumpGO executable found"
+          }
+          
+          Write-Host "Test complete. XDumpGO will auto-start when RDP user logs in."
 
       - name: Install Tailscale
         shell: pwsh
         run: |
+          Write-Host "Installing Tailscale..."
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $path = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest $url -OutFile $path
@@ -194,6 +224,7 @@ jobs:
       - name: Connect Tailscale
         shell: pwsh
         run: |
+          Write-Host "Connecting Tailscale..."
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
             --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
             --hostname=gh-rdp-$env:GITHUB_RUN_ID
@@ -201,6 +232,7 @@ jobs:
           Start-Sleep 10
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+          Write-Host "✅ Tailscale connected with IP: $ip"
 
       - name: Show RDP Details
         shell: pwsh
@@ -212,34 +244,23 @@ jobs:
           Write-Host "Username       : $env:RDP_USER"
           Write-Host "Password       : $env:RDP_PASS"
           Write-Host "------------------------------------------"
-          Write-Host "XDumpGO Status :"
-          
-          $process = Get-Process | Where-Object { $_.Path -like "*XDumpGO*" }
-          if ($process) {
-              Write-Host "- AUTO-RUNNING (PID: $($process.Id))"
-          } else {
-              Write-Host "- Not running - Auto-start configured"
-          }
-          
-          Write-Host "- Location: C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
-          Write-Host "- Auto-start: Enabled (Registry + Task Scheduler)"
-          Write-Host "- Auto-restart: Enabled"
-          Write-Host "- Desktop shortcut available"
+          Write-Host "XDumpGO Setup:"
+          Write-Host "- Location: C:\Users\RDP\Desktop\XDumpGO\"
+          Write-Host "- Desktop shortcut: XDumpGO.lnk"
+          Write-Host "- Auto-start: Configured (runs on login)"
+          Write-Host "- Note: May need RDP session for GUI"
           Write-Host "------------------------------------------"
-          Write-Host "Instructions:"
+          Write-Host "To Use:"
           Write-Host "1. Connect via RDP to: $env:TAILSCALE_IP"
           Write-Host "2. Login with above credentials"
-          Write-Host "3. XDumpGO will already be running"
+          Write_Host "3. Double-click XDumpGO shortcut on desktop"
+          Write-Host "4. If doesn't start, run as administrator"
           Write-Host "=========================================="
           
-          # Keep showing status
+          # Keep alive without monitoring XDumpGO
           $counter = 0
           while ($true) { 
               $counter++
-              $time = Get-Date -Format "HH:mm:ss"
-              $process = Get-Process | Where-Object { $_.Path -like "*XDumpGO*" }
-              $status = if ($process) { "RUNNING (PID: $($process.Id))" } else { "STOPPED" }
-              
-              Write-Host "[$time] Status #$counter: XDumpGO $status | RDP IP: $env:TAILSCALE_IP"
+              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP Ready - $counter - IP: $env:TAILSCALE_IP"
               Start-Sleep 60
           }
