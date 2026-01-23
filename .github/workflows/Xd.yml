@@ -1,4 +1,4 @@
-name: RDPXD
+name: RDPon
 
 on:
   workflow_dispatch:
@@ -12,348 +12,175 @@ jobs:
       - name: Enable RDP
         shell: pwsh
         run: |
-          # Enable RDP
           Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
             -Name fDenyTSConnections -Value 0
-          
-          # Configure firewall
           netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
-          
-          # Start Terminal Services
-          Set-Service -Name TermService -StartupType Automatic
-          Start-Service TermService
-          
-          Write-Host "✅ RDP enabled and firewall configured"
+          Restart-Service TermService -Force
 
       - name: Create RDP User
         shell: pwsh
         run: |
-          $user = "RDPUser"
-          $pass = -join ((33..126) | Get-Random -Count 16 | ForEach-Object {[char]$_})
-          
-          # Delete user if exists
-          try {
-              net user $user /delete 2>$null
-          } catch {}
-          
-          # Create new user
-          net user $user $pass /add /Y
+          $user = "RDP"
+          $pass = "Abc@1234Xy!"
+
+          net user $user /delete 2>$null
+          net user $user $pass /add
           net localgroup Administrators $user /add
           net localgroup "Remote Desktop Users" $user /add
-          
-          # Never expire password
-          wmic useraccount where name='$user' set passwordexpires=false
-          
+
           echo "RDP_USER=$user" >> $env:GITHUB_ENV
           echo "RDP_PASS=$pass" >> $env:GITHUB_ENV
-          
-          Write-Host "✅ User created: $user"
 
-      - name: Install 7-Zip
+      - name: Install 7-Zip for RAR extraction
         shell: pwsh
         run: |
-          if (Test-Path "C:\Program Files\7-Zip\7z.exe") {
-              Write-Host "✅ 7-Zip already installed"
+          $7zUrl = "https://www.7-zip.org/a/7z2407-x64.exe"
+          $7zPath = "$env:TEMP\7z.exe"
+          Invoke-WebRequest -Uri $7zUrl -OutFile $7zPath
+          Start-Process -FilePath $7zPath -ArgumentList "/S" -Wait
+          Write-Host "7-Zip installed successfully"
+
+      - name: Download XDumpGO RAR from MediaFire
+        shell: pwsh
+        run: |
+          $mediafireUrl = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279"
+          Write-Host "Downloading XDumpGO RAR from MediaFire..."
+          $rarPath = "C:\Users\Public\Desktop\XDumpGO.rar"
+          
+          try {
+              $pageContent = Invoke-WebRequest -Uri $mediafireUrl -UseBasicParsing
+              
+              if ($pageContent.Content -match 'href="(https://download[^"]+\.rar)"') {
+                  $downloadUrl = $matches[1]
+                  Write-Host "Found download URL: $downloadUrl"
+                  Invoke-WebRequest -Uri $downloadUrl -OutFile $rarPath
+              } else {
+                  Write-Host "Could not extract download link. Creating manual download instructions..."
+                  
+                  $instructions = "XDumpGO Download Instructions:`n1. Open browser in RDP`n2. Go to: https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279`n3. Click download`n4. Save to Desktop`n5. Extract using 7-Zip"
+                  
+                  $instructions | Out-File "C:\Users\Public\Desktop\Download_XDumpGO.txt" -Encoding UTF8
+                  throw "Automatic download failed. Manual download required."
+              }
+          } catch {
+              Write-Host "Error: $_"
+              throw "Download failed"
+          }
+          
+          if (Test-Path $rarPath) {
+              $fileSize = (Get-Item $rarPath).Length
+              Write-Host "✅ Download successful: $fileSize bytes"
           } else {
-              Write-Host "Installing 7-Zip..."
-              $7zUrl = "https://www.7-zip.org/a/7z2407-x64.exe"
-              $7zPath = "$env:TEMP\7z.exe"
-              Invoke-WebRequest -Uri $7zUrl -OutFile $7zPath
-              Start-Process -FilePath $7zPath -ArgumentList "/S" -Wait
-              Write-Host "✅ 7-Zip installed"
+              throw "❌ Download failed: File not found"
           }
 
-      - name: Download XDumpGO
+      - name: Extract XDumpGO to Desktop
         shell: pwsh
         run: |
-          $rarPath = "$env:USERPROFILE\Downloads\XDumpGO.rar"
+          $rarPath = "C:\Users\Public\Desktop\XDumpGO.rar"
+          $extractPath = "C:\Users\RDP\Desktop\XDumpGO"
           
-          # Try multiple sources
-          $sources = @(
-              "https://github.com/XDumpGO/XDumpGO/releases/download/v1.0/XDumpGO.rar",
-              "https://mirror.ghproxy.com/https://github.com/XDumpGO/XDumpGO/releases/download/v1.0/XDumpGO.rar",
-              "https://download2264.mediafire.com/m6jgrzle2lveqe2/x10g5we6bis/XDumpGO.rar"
-          )
+          # Create RDP user desktop folder
+          New-Item -ItemType Directory -Path "C:\Users\RDP\Desktop" -Force | Out-Null
           
-          foreach ($url in $sources) {
-              try {
-                  Write-Host "Trying: $url"
-                  Invoke-WebRequest -Uri $url -OutFile $rarPath -TimeoutSec 30
-                  
-                  if (Test-Path $rarPath -ErrorAction SilentlyContinue) {
-                      $size = (Get-Item $rarPath).Length
-                      if ($size -gt 1024) {
-                          Write-Host "✅ Download successful: $size bytes"
-                          echo "RAR_PATH=$rarPath" >> $env:GITHUB_ENV
-                          break
-                      }
-                  }
-              } catch {
-                  Write-Host "Failed: $($_.Exception.Message)"
-                  continue
+          if (Test-Path $rarPath) {
+              Write-Host "Extracting XDumpGO to Desktop..."
+              New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
+              & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
+              Write-Host "Extraction complete!"
+              
+              # List extracted files
+              Write-Host "Files on Desktop:"
+              Get-ChildItem $extractPath | Select-Object Name, Length | Format-Table
+              
+              # Cleanup RAR file
+              Remove-Item $rarPath -Force
+          } else {
+              Write-Host "RAR file not found. Skipping extraction."
+          }
+
+      - name: Start XDumpGO from Desktop
+        shell: pwsh
+        run: |
+          $xdumpgoPath = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
+          
+          if (Test-Path $xdumpgoPath) {
+              Write-Host "🚀 Starting XDumpGO from Desktop..."
+              Start-Process -FilePath $xdumpgoPath -WindowStyle Normal
+              
+              # Create additional shortcut (optional)
+              $WshShell = New-Object -ComObject WScript.Shell
+              $Shortcut = $WshShell.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
+              $Shortcut.TargetPath = $xdumpgoPath
+              $Shortcut.WorkingDirectory = "C:\Users\RDP\Desktop\XDumpGO"
+              $Shortcut.Save()
+              
+              # Add to startup
+              reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v XDumpGO /t REG_SZ /d "`"$xdumpgoPath`"" /f
+              
+              Write-Host "✅ XDumpGO started from Desktop"
+          } else {
+              Write-Host "⚠️ XDumpGO.exe not found on Desktop. Checking folder:"
+              Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse | Where-Object { $_.Name -like "*.exe" } | Select-Object Name, FullName | Format-Table
+              
+              # Try to find any executable
+              $exeFiles = Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse -Filter "*.exe" | Select-Object -First 1
+              if ($exeFiles) {
+                  Write-Host "Found executable: $($exeFiles.FullName)"
+                  Start-Process -FilePath $exeFiles.FullName
               }
           }
-          
-          if (-not (Test-Path $rarPath)) {
-              Write-Host "❌ All download attempts failed"
-              exit 1
-          }
-
-      - name: Extract and Setup XDumpGO
-        shell: pwsh
-        run: |
-          $rarPath = "$env:USERPROFILE\Downloads\XDumpGO.rar"
-          $targetDir = "C:\XDumpGO"
-          
-          # Clean previous installations
-          if (Test-Path $targetDir) {
-              Remove-Item $targetDir -Recurse -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Create target directory
-          New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-          
-          # Extract using 7-Zip
-          Write-Host "Extracting XDumpGO..."
-          & "C:\Program Files\7-Zip\7z.exe" x $rarPath "-o$targetDir" -y
-          
-          # Find and organize files
-          $exeFiles = Get-ChildItem $targetDir -Filter "*.exe" -Recurse -File
-          
-          if ($exeFiles.Count -eq 0) {
-              Write-Host "❌ No executable files found in archive"
-              exit 1
-          }
-          
-          # Try to find main executable
-          $mainExe = $exeFiles | Where-Object { $_.Name -match "XDumpGO" } | Select-Object -First 1
-          
-          if ($null -eq $mainExe) {
-              $mainExe = $exeFiles[0]  # Use first executable found
-          }
-          
-          Write-Host "Found main executable: $($mainExe.FullName)"
-          echo "XDMP_PATH=$($mainExe.FullName)" >> $env:GITHUB_ENV
-          echo "XDMP_DIR=$($mainExe.DirectoryName)" >> $env:GITHUB_ENV
-          
-          # Create desktop shortcuts for all users
-          $desktopPath = [Environment]::GetFolderPath("CommonDesktopDirectory")
-          $WshShell = New-Object -ComObject WScript.Shell
-          
-          # Create main shortcut
-          $shortcut = $WshShell.CreateShortcut("$desktopPath\XDumpGO.lnk")
-          $shortcut.TargetPath = $mainExe.FullName
-          $shortcut.WorkingDirectory = $mainExe.DirectoryName
-          $shortcut.Save()
-          
-          # Create startup shortcut for RDP user
-          $rdpStartup = "C:\Users\$env:RDP_USER\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
-          New-Item -ItemType Directory -Path $rdpStartup -Force | Out-Null
-          $startupShortcut = $WshShell.CreateShortcut("$rdpStartup\XDumpGO.lnk")
-          $startupShortcut.TargetPath = $mainExe.FullName
-          $startupShortcut.WorkingDirectory = $mainExe.DirectoryName
-          $startupShortcut.Save()
-          
-          # Cleanup RAR file
-          Remove-Item $rarPath -Force -ErrorAction SilentlyContinue
-          
-          Write-Host "✅ XDumpGO setup complete"
-
-      - name: Create Helper Scripts
-        shell: pwsh
-        run: |
-          # Create a helper batch file
-          $helperBat = @'
-@echo off
-echo Starting XDumpGO...
-echo.
-echo If XDumpGO doesn't start automatically:
-echo 1. Check if it's blocked by Windows Defender
-echo 2. Try running as Administrator
-echo 3. Look for it in C:\XDumpGO\
-echo.
-timeout /t 3
-start "" "C:\XDumpGO\XDumpGO.exe"
-'@
-          
-          $publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-          $helperBat | Out-File "$publicDesktop\Start_XDumpGO.bat" -Encoding ASCII
-          
-          # Create PowerShell script for troubleshooting
-          $psScript = @'
-Write-Host "XDumpGO Troubleshooter"
-Write-Host "========================"
-Write-Host "Checking XDumpGO installation..."
-
-$paths = @(
-    "C:\XDumpGO\",
-    "C:\Users\Public\Desktop\",
-    "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\"
-)
-
-foreach ($path in $paths) {
-    if (Test-Path $path) {
-        Write-Host "Checking $path"
-        Get-ChildItem $path -Filter "*XDumpGO*" -Recurse -ErrorAction SilentlyContinue | 
-            Select-Object Name, FullName, Length, LastWriteTime | Format-Table
-    }
-}
-
-Write-Host "`nIf XDumpGO is not found, try re-running the installation."
-'@
-          
-          $psScript | Out-File "$publicDesktop\Check_XDumpGO.ps1" -Encoding ASCII
-          
-          Write-Host "✅ Helper scripts created"
 
       - name: Install Tailscale
         shell: pwsh
         run: |
-          # Check if already installed
-          if (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") {
-              Write-Host "✅ Tailscale already installed"
-          } else {
-              Write-Host "Installing Tailscale..."
-              
-              # Get latest stable version
-              $latest = Invoke-RestMethod -Uri "https://pkgs.tailscale.com/stable/?format=json" | 
-                        Select-Object -ExpandProperty Version
-              
-              $url = "https://pkgs.tailscale.com/stable/tailscale-setup-$latest-amd64.msi"
-              $path = "$env:TEMP\tailscale.msi"
-              
-              Invoke-WebRequest $url -OutFile $path
-              Start-Process msiexec.exe -Wait -ArgumentList @(
-                  "/i",
-                  "`"$path`"",
-                  "/quiet",
-                  "/norestart",
-                  "ACCEPT_OPTIONS=1"
-              )
-              
-              Remove-Item $path -Force
-              Write-Host "✅ Tailscale installed"
-          }
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $path = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest $url -OutFile $path
+          Start-Process msiexec.exe -ArgumentList "/i `"$path`" /quiet /norestart" -Wait
 
       - name: Connect Tailscale
         shell: pwsh
         run: |
-          # Start Tailscale service
-          Start-Service Tailscale -ErrorAction SilentlyContinue
-          
-          # Generate hostname
-          $hostname = "gh-runner-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-          
-          # Connect to Tailscale
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
-            --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" `
-            --hostname="$hostname" `
-            --accept-routes=true `
-            --accept-dns=true `
-            --shields-up=false `
-            --reset
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
+            --hostname=gh-rdp-$env:GITHUB_RUN_ID
           
-          # Wait for connection
-          Start-Sleep -Seconds 10
-          
-          # Get IP address
+          Start-Sleep 10
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+
+      - name: Show RDP Details
+        shell: pwsh
+        run: |
+          Write-Host "=========================================="
+          Write-Host "           RDP ACCESS READY               "
+          Write-Host "=========================================="
+          Write-Host "RDP IP Address : $env:TAILSCALE_IP"
+          Write-Host "Username       : $env:RDP_USER"
+          Write-Host "Password       : $env:RDP_PASS"
+          Write-Host "------------------------------------------"
+          Write-Host "XDumpGO Status :"
           
-          if ([string]::IsNullOrEmpty($ip)) {
-              Write-Host "⚠️ Tailscale IP not obtained, checking status..."
-              & "$env:ProgramFiles\Tailscale\tailscale.exe" status
-              $ip = "Not connected"
+          $process = Get-Process | Where-Object { $_.Path -like "*XDumpGO*" }
+          if ($process) {
+              Write-Host "- ✅ Running (PID: $($process.Id))"
           } else {
-              echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
-              Write-Host "✅ Tailscale connected with IP: $ip"
-          }
-
-      - name: Configure System
-        shell: pwsh
-        run: |
-          # Disable sleep
-          powercfg -change -standby-timeout-ac 0
-          powercfg -change -hibernate-timeout-ac 0
-          
-          # Disable screen timeout
-          powercfg /x monitor-timeout-ac 0
-          
-          # Disable UAC for easier remote access
-          Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" `
-            -Name "ConsentPromptBehaviorAdmin" -Value 0
-          
-          # Allow all traffic through firewall for Tailscale
-          netsh advfirewall firewall add rule name="Tailscale" dir=in action=allow program="$env:ProgramFiles\Tailscale\tailscale.exe"
-          
-          Write-Host "✅ System configured for RDP"
-
-      - name: Show Connection Information
-        shell: pwsh
-        run: |
-          # Get system information
-          $computerInfo = Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, OsHardwareAbstractionLayer
-          $tailscaleStatus = & "$env:ProgramFiles\Tailscale\tailscale.exe" status 2>$null
-          
-          Write-Host "=========================================="
-          Write-Host "           RDP SETUP COMPLETE             "
-          Write-Host "=========================================="
-          Write-Host "System: $($computerInfo.WindowsProductName)"
-          Write-Host "Version: $($computerInfo.WindowsVersion)"
-          Write-Host "------------------------------------------"
-          Write-Host "RDP CONNECTION DETAILS:"
-          Write-Host "IP Address  : $env:TAILSCALE_IP"
-          Write-Host "Username    : $env:RDP_USER"
-          Write-Host "Password    : $env:RDP_PASS"
-          Write-Host "------------------------------------------"
-          Write-Host "XDumpGO LOCATION:"
-          Write-Host "Main: C:\XDumpGO\"
-          
-          # Show what's in the XDumpGO folder
-          if (Test-Path "C:\XDumpGO") {
-              Get-ChildItem "C:\XDumpGO" -File | Select-Object Name, Length | Format-Table
+              Write-Host "- ⚠️ Not running - will start on RDP login"
           }
           
+          Write-Host "- 📁 Location: C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
+          Write-Host "- 🔗 Desktop folder: XDumpGO"
           Write-Host "------------------------------------------"
-          Write-Host "TAILSCALE STATUS:"
-          if ($tailscaleStatus) {
-              $tailscaleStatus | Select-String -Pattern "Connected" | ForEach-Object { Write-Host $_ }
-          }
-          Write-Host "------------------------------------------"
-          Write-Host "DESKTOP SHORTCUTS:"
-          $desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-          Get-ChildItem $desktop -Filter "*XDumpGO*" | ForEach-Object { Write-Host "- $($_.Name)" }
-          Write-Host "=========================================="
-          Write-Host ""
           Write-Host "Instructions:"
           Write-Host "1. Connect via RDP to: $env:TAILSCALE_IP"
-          Write-Host "2. Login with credentials above"
-          Write-Host "3. XDumpGO should auto-start on login"
-          Write-Host "4. If not, use shortcuts on desktop"
-          Write-Host ""
-          Write-Host "This runner will stay active for 60 minutes"
+          Write-Host "2. Login with above credentials"
+          Write-Host "3. Look for XDumpGO folder on desktop"
           Write-Host "=========================================="
-
-      - name: Keep Runner Alive
-        shell: pwsh
-        run: |
-          # Set maximum runtime (55 minutes to be safe)
-          $maxRuntime = 55 * 60
-          $startTime = Get-Date
           
-          while ($true) {
-              $elapsed = (Get-Date) - $startTime
-              
-              if ($elapsed.TotalSeconds -gt $maxRuntime) {
-                  Write-Host "⏰ Maximum runtime reached. Shutting down..."
-                  break
-              }
-              
-              # Show status every 30 seconds
-              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP Active - Time remaining: $([math]::Round(($maxRuntime - $elapsed.TotalSeconds)/60)) minutes"
-              
-              # Keep services running
-              Get-Service TermService | Set-Service -Status Running -ErrorAction SilentlyContinue
-              Get-Service Tailscale | Set-Service -Status Running -ErrorAction SilentlyContinue
-              
-              Start-Sleep -Seconds 30
+          $counter = 0
+          while ($true) { 
+              $counter++
+              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Runner active - $counter/∞ - IP: $env:TAILSCALE_IP"
+              Start-Sleep 300 
           }
