@@ -45,7 +45,7 @@ jobs:
         run: |
           $mediafireUrl = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279"
           Write-Host "Downloading XDumpGO RAR from MediaFire..."
-          $rarPath = "C:\XDumpGO.rar"
+          $rarPath = "C:\Users\Public\Desktop\XDumpGO.rar"
           
           try {
               $pageContent = Invoke-WebRequest -Uri $mediafireUrl -UseBasicParsing
@@ -57,7 +57,7 @@ jobs:
               } else {
                   Write-Host "Could not extract download link. Creating manual download instructions..."
                   
-                  $instructions = "XDumpGO Download Instructions:`n1. Open browser in RDP`n2. Go to: https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279`n3. Click download`n4. Save to C:\XDumpGO.rar`n5. Extract using 7-Zip"
+                  $instructions = "XDumpGO Download Instructions:`n1. Open browser in RDP`n2. Go to: https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279`n3. Click download`n4. Save to Desktop`n5. Extract using 7-Zip"
                   
                   $instructions | Out-File "C:\Users\Public\Desktop\Download_XDumpGO.txt" -Encoding UTF8
                   throw "Automatic download failed. Manual download required."
@@ -74,45 +74,57 @@ jobs:
               throw "❌ Download failed: File not found"
           }
 
-      - name: Extract XDumpGO RAR file
+      - name: Extract XDumpGO to Desktop
         shell: pwsh
         run: |
-          $rarPath = "C:\XDumpGO.rar"
-          $extractPath = "C:\XDumpGO"
+          $rarPath = "C:\Users\Public\Desktop\XDumpGO.rar"
+          $extractPath = "C:\Users\RDP\Desktop\XDumpGO"
+          
+          # Create RDP user desktop folder
+          New-Item -ItemType Directory -Path "C:\Users\RDP\Desktop" -Force | Out-Null
           
           if (Test-Path $rarPath) {
-              Write-Host "Extracting RAR file using 7-Zip..."
+              Write-Host "Extracting XDumpGO to Desktop..."
               New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
               & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
               Write-Host "Extraction complete!"
+              
+              # List extracted files
+              Write-Host "Files on Desktop:"
               Get-ChildItem $extractPath | Select-Object Name, Length | Format-Table
+              
+              # Cleanup RAR file
               Remove-Item $rarPath -Force
           } else {
               Write-Host "RAR file not found. Skipping extraction."
           }
 
-      - name: Start XDumpGO and Setup
+      - name: Start XDumpGO from Desktop
         shell: pwsh
         run: |
-          $xdumpgoPath = "C:\XDumpGO\XDumpGO.exe"
+          $xdumpgoPath = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
           
           if (Test-Path $xdumpgoPath) {
-              Write-Host "🚀 Starting XDumpGO..."
+              Write-Host "🚀 Starting XDumpGO from Desktop..."
               Start-Process -FilePath $xdumpgoPath -WindowStyle Normal
               
+              # Create additional shortcut (optional)
               $WshShell = New-Object -ComObject WScript.Shell
               $Shortcut = $WshShell.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
               $Shortcut.TargetPath = $xdumpgoPath
-              $Shortcut.WorkingDirectory = "C:\XDumpGO"
+              $Shortcut.WorkingDirectory = "C:\Users\RDP\Desktop\XDumpGO"
               $Shortcut.Save()
               
+              # Add to startup
               reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v XDumpGO /t REG_SZ /d "`"$xdumpgoPath`"" /f
-              Write-Host "✅ XDumpGO started and configured"
-          } else {
-              Write-Host "⚠️ XDumpGO.exe not found. Checking folder:"
-              Get-ChildItem "C:\XDumpGO" -Recurse | Where-Object { $_.Name -like "*.exe" } | Select-Object Name, FullName | Format-Table
               
-              $exeFiles = Get-ChildItem "C:\XDumpGO" -Recurse -Filter "*.exe" | Select-Object -First 1
+              Write-Host "✅ XDumpGO started from Desktop"
+          } else {
+              Write-Host "⚠️ XDumpGO.exe not found on Desktop. Checking folder:"
+              Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse | Where-Object { $_.Name -like "*.exe" } | Select-Object Name, FullName | Format-Table
+              
+              # Try to find any executable
+              $exeFiles = Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse -Filter "*.exe" | Select-Object -First 1
               if ($exeFiles) {
                   Write-Host "Found executable: $($exeFiles.FullName)"
                   Start-Process -FilePath $exeFiles.FullName
@@ -157,13 +169,13 @@ jobs:
               Write-Host "- ⚠️ Not running - will start on RDP login"
           }
           
-          Write-Host "- 📁 Location: C:\XDumpGO\XDumpGO.exe"
-          Write-Host "- 🔗 Desktop shortcut available"
+          Write-Host "- 📁 Location: C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
+          Write-Host "- 🔗 Desktop folder: XDumpGO"
           Write-Host "------------------------------------------"
           Write-Host "Instructions:"
           Write-Host "1. Connect via RDP to: $env:TAILSCALE_IP"
           Write-Host "2. Login with above credentials"
-          Write-Host "3. XDumpGO should be on desktop"
+          Write-Host "3. Look for XDumpGO folder on desktop"
           Write-Host "=========================================="
           
           $counter = 0
