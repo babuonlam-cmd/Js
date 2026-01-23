@@ -71,38 +71,59 @@ jobs:
           
           Write-Host "Extraction complete!"
 
-      - name: Setup XDumpGO Auto-Run
+      - name: Direct Start XDumpGO Immediately
         shell: pwsh
         run: |
-          # Create desktop shortcut
+          # XDumpGO ko direct start karein (RDP login se pehle)
+          $xdumpgoPath = "C:\XDumpGO\XDumpGO.exe"
+          
+          if (Test-Path $xdumpgoPath) {
+              Write-Host "🚀 Direct starting XDumpGO (no login required)..."
+              
+              # Method 1: Simple start
+              Start-Process -FilePath $xdumpgoPath -WindowStyle Normal -PassThru
+              
+              # Method 2: As a background service
+              $serviceScript = @'
+              $process = Start-Process "C:\XDumpGO\XDumpGO.exe" -WindowStyle Normal -PassThru
+              while($true) {
+                  if ($process.HasExited) {
+                      Write-Host "XDumpGO closed. Restarting..."
+                      $process = Start-Process "C:\XDumpGO\XDumpGO.exe" -WindowStyle Normal -PassThru
+                  }
+                  Start-Sleep -Seconds 30
+              }
+              '@
+              
+              # Run as background job
+              $job = Start-Job -ScriptBlock {
+                  Start-Process "C:\XDumpGO\XDumpGO.exe" -WindowStyle Normal
+              }
+              
+              Write-Host "✅ XDumpGO started directly as background process"
+              Write-Host "Process ID: $(Get-Process XDumpGO -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)"
+              
+              # Verify it's running
+              Start-Sleep -Seconds 10
+              $process = Get-Process | Where-Object {$_.ProcessName -like "*XDumpGO*"}
+              if ($process) {
+                  Write-Host "✅ XDumpGO is running with PID: $($process.Id)"
+              } else {
+                  Write-Host "⚠️ XDumpGO might need GUI session. Creating startup script instead..."
+              }
+              
+          } else {
+              Write-Host "❌ XDumpGO.exe not found at $xdumpgoPath"
+          }
+          
+          # Create desktop shortcut for RDP user (optional)
           $WshShell = New-Object -ComObject WScript.Shell
           $Shortcut = $WshShell.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
           $Shortcut.TargetPath = "C:\XDumpGO\XDumpGO.exe"
           $Shortcut.WorkingDirectory = "C:\XDumpGO"
           $Shortcut.Save()
           
-          # Add to startup (simplest method)
-          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v XDumpGO /t REG_SZ /d "C:\XDumpGO\XDumpGO.exe" /f
-          
-          Write-Host "Created desktop shortcut and startup entry"
-
-      - name: Install Burp Suite Community
-        shell: pwsh
-        run: |
-          $url = "https://portswigger-cdn.net/burp/releases/download?product=community&version=2024.12.1&type=WindowsX64"
-          $exe = "$env:TEMP\burpsuite.exe"
-          
-          Invoke-WebRequest $url -OutFile $exe
-          Start-Process $exe -ArgumentList "-q" -Wait
-          
-          # Desktop shortcut
-          $desktop = "C:\Users\Public\Desktop"
-          $target = "C:\Program Files\BurpSuiteCommunity\BurpSuiteCommunity.exe"
-          
-          $wsh = New-Object -ComObject WScript.Shell
-          $shortcut = $wsh.CreateShortcut("$desktop\Burp Suite.lnk")
-          $shortcut.TargetPath = $target
-          $shortcut.Save()
+          Write-Host "Desktop shortcut created"
 
       - name: Install Tailscale
         shell: pwsh
@@ -123,28 +144,45 @@ jobs:
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
 
-      - name: Show RDP Details
+      - name: Keep XDumpGO Running & Show Info
         shell: pwsh
         run: |
-          Write-Host "===================================="
-          Write-Host "       RDP CONNECTION DETAILS       "
-          Write-Host "===================================="
-          Write-Host "IP Address   : $env:TAILSCALE_IP"
+          Write-Host "========================================="
+          Write-Host "        RDP + XDumpGO DIRECT START       "
+          Write-Host "========================================="
+          Write-Host "RDP IP       : $env:TAILSCALE_IP"
           Write-Host "Username     : $env:RDP_USER"
           Write-Host "Password     : $env:RDP_PASS"
-          Write-Host "===================================="
-          Write-Host ""
+          Write-Host "-----------------------------------------"
           Write-Host "XDumpGO Status:"
-          Write-Host "- Location: C:\XDumpGO\XDumpGO.exe"
-          Write-Host "- Desktop shortcut created"
-          Write-Host "- Will auto-start on login"
-          Write-Host ""
-          Write-Host "Files extracted:"
-          Get-ChildItem "C:\XDumpGO" | Select-Object -First 10 Name, Length | Format-Table
-          Write-Host "===================================="
           
-          # Keep runner alive
+          # Check if XDumpGO is running
+          $xdumpgoProcess = Get-Process | Where-Object {$_.ProcessName -like "*XDumpGO*"}
+          if ($xdumpgoProcess) {
+              Write-Host "✅ RUNNING - PID: $($xdumpgoProcess.Id)"
+          } else {
+              Write-Host "⚠️ NOT RUNNING - Will start on RDP login"
+              # Try to start again
+              Start-Process "C:\XDumpGO\XDumpGO.exe" -WindowStyle Minimized -ErrorAction SilentlyContinue
+          }
+          
+          Write-Host "Location     : C:\XDumpGO\XDumpGO.exe"
+          Write-Host "========================================="
+          
+          # Keep checking and restart if needed
+          $counter = 0
           while ($true) { 
-              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Runner active - IP: $env:TAILSCALE_IP"
-              Start-Sleep 300 
+              $counter++
+              $process = Get-Process | Where-Object {$_.ProcessName -like "*XDumpGO*"}
+              $status = if ($process) { "✅ RUNNING (PID: $($process.Id))" } else { "❌ STOPPED" }
+              
+              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Check #$counter - XDumpGO: $status"
+              
+              # If not running, try to restart
+              if (-not $process) {
+                  Write-Host "Attempting to restart XDumpGO..."
+                  Start-Process "C:\XDumpGO\XDumpGO.exe" -WindowStyle Minimized -ErrorAction SilentlyContinue
+              }
+              
+              Start-Sleep 30 
           }
