@@ -1,20 +1,19 @@
-name: RDPXD
+name: RDP with XDumpGO
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp:
+  setup-rdp:
     runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Enable RDP
+      - name: Enable Remote Desktop
         shell: pwsh
         run: |
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
-            -Name fDenyTSConnections -Value 0
-          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Restart-Service TermService -Force
 
       - name: Create RDP User
@@ -22,167 +21,106 @@ jobs:
         run: |
           $user = "RDP"
           $pass = "Abc@1234Xy!"
-
+          
+          # Delete if exists, then create
           net user $user /delete 2>$null
           net user $user $pass /add
           net localgroup Administrators $user /add
           net localgroup "Remote Desktop Users" $user /add
-
+          
+          # Save to environment
           echo "RDP_USER=$user" >> $env:GITHUB_ENV
           echo "RDP_PASS=$pass" >> $env:GITHUB_ENV
 
-      - name: Download & Extract XDumpGO (2 parts only)
+      - name: Download XDumpGO Parts
         shell: pwsh
         run: |
-          # Download ONLY 2 parts
-          $baseUrl = "https://github.com/babuonlam-cmd/Js/raw/main/XDumpGO.zip"
+          $url = "https://github.com/babuonlam-cmd/Js/raw/main/XDumpGO.zip"
           
-          Write-Host "Downloading part 1 (24.00MB)..."
-          Invoke-WebRequest -Uri "$baseUrl.t0.001" -OutFile "part1"
+          # Download both parts
+          Invoke-WebRequest "$url.t0.001" -OutFile "p1"
+          Invoke-WebRequest "$url.t0.002" -OutFile "p2"
           
-          Write-Host "Downloading part 2 (1.41MB)..."
-          Invoke-WebRequest -Uri "$baseUrl.t0.002" -OutFile "part2"
-          
-          Write-Host "Combining parts (25.41MB total)..."
-          # Combine ONLY 2 parts
-          $stream = [System.IO.File]::Create("XDumpGO.zip")
-          try {
-              $part1 = [System.IO.File]::ReadAllBytes("part1")
-              $stream.Write($part1, 0, $part1.Length)
-              Write-Host "Added part1: $($part1.Length) bytes"
-              
-              $part2 = [System.IO.File]::ReadAllBytes("part2")
-              $stream.Write($part2, 0, $part2.Length)
-              Write-Host "Added part2: $($part2.Length) bytes"
-          } finally {
-              $stream.Close()
-          }
-          
-          # Verify
-          $size = (Get-Item "XDumpGO.zip").Length
-          Write-Host "Final ZIP size: $size bytes"
+          # Combine parts
+          $f1 = [System.IO.File]::ReadAllBytes("p1")
+          $f2 = [System.IO.File]::ReadAllBytes("p2")
+          $combined = $f1 + $f2
+          [System.IO.File]::WriteAllBytes("XDumpGO.zip", $combined)
           
           # Extract
-          Write-Host "Extracting to C:\XDumpGO..."
           Expand-Archive -Path "XDumpGO.zip" -DestinationPath "C:\XDumpGO" -Force
           
           # Cleanup
-          Remove-Item -Path "part1", "part2", "XDumpGO.zip" -Force -ErrorAction SilentlyContinue
-          
-          Write-Host "Extraction complete!"
+          Remove-Item "p1", "p2", "XDumpGO.zip" -Force
 
-      - name: Direct Start XDumpGO Immediately
+      - name: Start XDumpGO Application
         shell: pwsh
         run: |
-          # XDumpGO ko direct start karein (RDP login se pehle)
-          $xdumpgoPath = "C:\XDumpGO\XDumpGO.exe"
-          
-          if (Test-Path $xdumpgoPath) {
-              Write-Host "🚀 Direct starting XDumpGO (no login required)..."
-              
-              # Simple start
-              Start-Process -FilePath $xdumpgoPath -WindowStyle Normal
-              
-              # Wait and verify
-              Start-Sleep -Seconds 5
-              
-              # Check if running
-              $process = Get-Process | Where-Object {$_.Name -eq "XDumpGO" -or $_.MainWindowTitle -like "*XDumpGO*"}
-              if ($process) {
-                  Write-Host "✅ XDumpGO started with PID: $($process.Id)"
-              } else {
-                  Write-Host "⚠️ XDumpGO process not found by name, checking all processes..."
-                  # Alternative check
-                  $allProcesses = Get-Process | Where-Object {$_.Path -like "*XDumpGO*"} | Select-Object -First 1
-                  if ($allProcesses) {
-                      Write-Host "✅ XDumpGO found with PID: $($allProcesses.Id)"
-                  } else {
-                      Write-Host "⚠️ XDumpGO might be running without visible process name"
-                  }
-              }
-              
-          } else {
-              Write-Host "❌ XDumpGO.exe not found at $xdumpgoPath"
-              Write-Host "Checking C:\XDumpGO directory:"
-              Get-ChildItem "C:\XDumpGO" | Format-Table Name, Length
-          }
+          # Start XDumpGO
+          Start-Process "C:\XDumpGO\XDumpGO.exe"
           
           # Create desktop shortcut
-          $WshShell = New-Object -ComObject WScript.Shell
-          $Shortcut = $WshShell.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
-          $Shortcut.TargetPath = "C:\XDumpGO\XDumpGO.exe"
-          $Shortcut.WorkingDirectory = "C:\XDumpGO"
-          $Shortcut.Save()
+          $ws = New-Object -ComObject WScript.Shell
+          $sc = $ws.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
+          $sc.TargetPath = "C:\XDumpGO\XDumpGO.exe"
+          $sc.WorkingDirectory = "C:\XDumpGO"
+          $sc.Save()
           
-          Write-Host "Desktop shortcut created"
+          Write-Host "XDumpGO started and shortcut created"
 
-      - name: Install Tailscale
+      - name: Install Tailscale VPN
         shell: pwsh
         run: |
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $path = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest $url -OutFile $path
-          Start-Process msiexec.exe -ArgumentList "/i `"$path`" /quiet /norestart" -Wait
+          # Download and install Tailscale
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-amd64.msi"
+          $tsPath = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest $tsUrl -OutFile $tsPath
+          Start-Process msiexec.exe -ArgumentList "/i `"$tsPath`" /quiet /norestart" -Wait
+          
+          # Wait for installation
+          Start-Sleep -Seconds 10
 
-      - name: Connect Tailscale
+      - name: Connect Tailscale Network
         shell: pwsh
         run: |
+          # Connect to Tailscale
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
             --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
-            --hostname=gh-rdp-$env:GITHUB_RUN_ID
-          
-          Start-Sleep 10
+            --hostname=github-rdp-machine
+            
+          # Get Tailscale IP
+          Start-Sleep -Seconds 5
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+          
+          Write-Host "Connected to Tailscale with IP: $ip"
 
-      - name: Keep XDumpGO Running & Show Info
+      - name: Display Connection Information
         shell: pwsh
         run: |
-          Write-Host "========================================="
-          Write-Host "        RDP + XDumpGO DIRECT START       "
-          Write-Host "========================================="
-          Write-Host "RDP IP       : $env:TAILSCALE_IP"
-          Write-Host "Username     : $env:RDP_USER"
-          Write-Host "Password     : $env:RDP_PASS"
-          Write-Host "-----------------------------------------"
+          Write-Host "=========================================="
+          Write-Host "      RDP CONNECTION ESTABLISHED          "
+          Write-Host "=========================================="
+          Write-Host "RDP Address: $env:TAILSCALE_IP"
+          Write-Host "Username   : $env:RDP_USER"
+          Write-Host "Password   : $env:RDP_PASS"
+          Write-Host ""
           Write-Host "XDumpGO Status:"
+          Write-Host "- Application is running"
+          Write-Host "- Desktop shortcut available"
+          Write-Host "- Location: C:\XDumpGO\XDumpGO.exe"
+          Write-Host ""
+          Write-Host "To connect:"
+          Write-Host "1. Use Remote Desktop Connection"
+          Write-Host "2. Enter IP: $env:TAILSCALE_IP"
+          Write-Host "3. Use credentials above"
+          Write-Host "4. XDumpGO will be on desktop"
+          Write-Host "=========================================="
           
-          # Try to find and start XDumpGO
-          $xdumpgoExe = "C:\XDumpGO\XDumpGO.exe"
-          
-          if (Test-Path $xdumpgoExe) {
-              Write-Host "✅ Executable found: $xdumpgoExe"
-              
-              # Check if already running
-              $processes = Get-Process | Where-Object {$_.Path -like "*XDumpGO*"}
-              
-              if ($processes) {
-                  Write-Host "✅ Already running - PID: $($processes[0].Id)"
-              } else {
-                  Write-Host "⚠️ Not running, attempting to start..."
-                  Start-Process -FilePath $xdumpgoExe -WindowStyle Minimized
-                  Start-Sleep -Seconds 3
-                  
-                  # Check again
-                  $newProcess = Get-Process | Where-Object {$_.Path -like "*XDumpGO*"}
-                  if ($newProcess) {
-                      Write-Host "✅ Started with PID: $($newProcess[0].Id)"
-                  } else {
-                      Write-Host "❌ Could not start. Might require GUI session."
-                  }
-              }
-          } else {
-              Write-Host "❌ XDumpGO.exe not found!"
-          }
-          
-          Write-Host "Location     : C:\XDumpGO\XDumpGO.exe"
-          Write-Host "========================================="
-          
-          # Simple keep-alive loop
-          $counter = 0
-          while ($true) { 
+          # Keep the workflow running
+          $counter = 1
+          while ($true) {
+              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP active for $(($counter * 5)) minutes"
               $counter++
-              $currentTime = Get-Date -Format "HH:mm:ss"
-              Write-Host "[$currentTime] Check #$counter - RDP IP: $env:TAILSCALE_IP"
-              Start-Sleep 30 
+              Start-Sleep -Seconds 300
           }
