@@ -105,10 +105,10 @@ jobs:
           $xdumpgoPath = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
           
           if (Test-Path $xdumpgoPath) {
-              Write-Host "⚙️ Setting up XDumpGO auto-start..."
+              Write-Host "Setting up XDumpGO auto-start..."
               
               # 1. Start XDumpGO immediately
-              Write-Host "🚀 Starting XDumpGO now..."
+              Write-Host "Starting XDumpGO now..."
               Start-Process -FilePath $xdumpgoPath -WindowStyle Normal
               
               # 2. Create shortcut on public desktop
@@ -119,42 +119,37 @@ jobs:
               $Shortcut.Save()
               
               # 3. Add to Windows Startup (Registry)
-              Write-Host "📝 Adding to Windows Startup..."
+              Write-Host "Adding to Windows Startup..."
               reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v XDumpGO /t REG_SZ /d "`"$xdumpgoPath`"" /f
               
               # 4. Create Scheduled Task for auto-start
-              Write-Host "⏰ Creating Scheduled Task..."
+              Write-Host "Creating Scheduled Task..."
               $taskName = "XDumpGO AutoStart"
-              $taskDescription = "Automatically starts XDumpGO on system boot and user login"
               
               # Delete existing task if any
               schtasks /delete /tn "$taskName" /f 2>$null
               
-              # Create new task using schtasks command
-              $taskCommand = "schtasks /create /tn `"$taskName`" /tr `"$xdumpgoPath`" /sc onlogon /ru `"RDP`" /rl highest /f"
-              Invoke-Expression $taskCommand
+              # Create new task
+              schtasks /create /tn "$taskName" /tr "$xdumpgoPath" /sc onstart /ru SYSTEM /rl highest /f
+              schtasks /create /tn "XDumpGO Login" /tr "$xdumpgoPath" /sc onlogon /ru RDP /rl highest /f
               
               # 5. Create batch file for auto-restart
-              Write-Host "🔄 Creating auto-restart script..."
-              $restartScript = '@echo off
-:start
-"C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
-timeout /t 10
-goto start'
+              Write-Host "Creating auto-restart script..."
+              $restartScript = "@echo off`n:start`n`"$xdumpgoPath`"`ntimeout /t 10`ngoto start"
               
               $restartScript | Out-File "C:\Users\Public\Desktop\AutoStart_XDumpGO.bat" -Encoding ASCII
               
-              Write-Host "✅ Auto-start setup complete!"
+              Write-Host "Auto-start setup complete!"
               
           } else {
-              Write-Host "⚠️ XDumpGO.exe not found on Desktop. Checking folder:"
+              Write-Host "XDumpGO.exe not found on Desktop. Checking folder:"
               Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse | Where-Object { $_.Name -like "*.exe" } | Select-Object Name, FullName | Format-Table
           }
 
-      - name: Monitor XDumpGO
+      - name: Monitor XDumpGO (Optional)
         shell: pwsh
         run: |
-          Write-Host "👁️ Monitoring XDumpGO..."
+          Write-Host "Monitoring XDumpGO..."
           
           # Function to start XDumpGO
           function Start-XDumpGO {
@@ -179,9 +174,9 @@ goto start'
               $process = Get-Process | Where-Object { $_.Name -like "*XDumpGO*" -or $_.Path -like "*XDumpGO*" }
               
               if ($process) {
-                  Write-Host "[$currentTime] ✅ XDumpGO running (PID: $($process.Id)) - Check #$checkCount"
+                  Write-Host "[$currentTime] XDumpGO running (PID: $($process.Id)) - Check #$checkCount"
               } else {
-                  Write-Host "[$currentTime] ⚠️ XDumpGO not found - Attempting to restart..."
+                  Write-Host "[$currentTime] XDumpGO not found - Attempting to restart..."
                   Start-XDumpGO
               }
               
@@ -221,22 +216,15 @@ goto start'
           
           $process = Get-Process | Where-Object { $_.Path -like "*XDumpGO*" }
           if ($process) {
-              Write-Host "- ✅ AUTO-RUNNING (PID: $($process.Id))"
+              Write-Host "- AUTO-RUNNING (PID: $($process.Id))"
           } else {
-              Write-Host "- ⚠️ Not running - Auto-start configured"
+              Write-Host "- Not running - Auto-start configured"
           }
           
-          Write-Host "- 📁 Location: C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
-          Write-Host "- 🔗 Auto-start: Enabled (Registry + Task Scheduler)"
-          Write-Host "- 🔄 Auto-restart: Enabled"
-          Write-Host "- 📋 Desktop shortcut available"
-          Write-Host "------------------------------------------"
-          Write-Host "Auto-start Features:"
-          Write-Host "1. Started immediately"
-          Write-Host "2. Auto-starts on Windows boot"
-          Write-Host "3. Auto-starts on RDP login"
-          Write-Host "4. Auto-restart if closed"
-          Write-Host "5. Continuous monitoring"
+          Write-Host "- Location: C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
+          Write-Host "- Auto-start: Enabled (Registry + Task Scheduler)"
+          Write-Host "- Auto-restart: Enabled"
+          Write-Host "- Desktop shortcut available"
           Write-Host "------------------------------------------"
           Write-Host "Instructions:"
           Write-Host "1. Connect via RDP to: $env:TAILSCALE_IP"
@@ -250,7 +238,7 @@ goto start'
               $counter++
               $time = Get-Date -Format "HH:mm:ss"
               $process = Get-Process | Where-Object { $_.Path -like "*XDumpGO*" }
-              $status = if ($process) { "✅ RUNNING (PID: $($process.Id))" } else { "❌ STOPPED" }
+              $status = if ($process) { "RUNNING (PID: $($process.Id))" } else { "STOPPED" }
               
               Write-Host "[$time] Status #$counter: XDumpGO $status | RDP IP: $env:TAILSCALE_IP"
               Start-Sleep 60
