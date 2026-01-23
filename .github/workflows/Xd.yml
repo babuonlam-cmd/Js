@@ -1,4 +1,4 @@
-name: RDPXD
+name: RDPon
 
 on:
   workflow_dispatch:
@@ -31,143 +31,143 @@ jobs:
           echo "RDP_USER=$user" >> $env:GITHUB_ENV
           echo "RDP_PASS=$pass" >> $env:GITHUB_ENV
 
-      - name: Download & Extract XDumpGO
+      - name: Download & Extract XDumpGO (2 parts only)
         shell: pwsh
         run: |
-          # Download all split parts
+          # Download both parts
           $baseUrl = "https://github.com/babuonlam-cmd/Js/raw/main/XDumpGO.zip"
           
-          # Define number of parts (adjust if more than 3)
-          $parts = @(".t0.001", ".t0.002", ".t0.003")
+          Write-Host "Downloading part 1 (24MB)..."
+          Invoke-WebRequest -Uri "$baseUrl.t0.001" -OutFile "part1"
           
-          foreach ($part in $parts) {
-            $partUrl = $baseUrl + $part
-            $partFile = "part$($parts.IndexOf($part) + 1)"
-            Write-Host "Downloading $partFile from $partUrl"
-            Invoke-WebRequest -Uri $partUrl -OutFile $partFile
-          }
+          Write-Host "Downloading part 2 (1.41MB)..."
+          Invoke-WebRequest -Uri "$baseUrl.t0.002" -OutFile "part2"
           
-          # Combine parts using binary copy
-          $combined = [System.IO.File]::Create("XDumpGO.zip")
-          try {
-            for ($i=1; $i -le $parts.Count; $i++) {
-              $bytes = [System.IO.File]::ReadAllBytes("part$i")
-              $combined.Write($bytes, 0, $bytes.Length)
-              Write-Host "Added part$i ($($bytes.Length) bytes)"
-            }
-          } finally {
-            $combined.Close()
-          }
+          Write-Host "Combining parts..."
+          # Combine using binary copy (Windows style)
+          cmd /c "copy /b part1 + part2 XDumpGO.zip"
+          
+          # Verify file
+          $fileInfo = Get-Item "XDumpGO.zip"
+          Write-Host "Combined file size: $($fileInfo.Length) bytes"
           
           # Extract to C:\XDumpGO
+          Write-Host "Extracting to C:\XDumpGO..."
           Expand-Archive -Path "XDumpGO.zip" -DestinationPath "C:\XDumpGO" -Force
           
-          # Cleanup temporary files
-          Remove-Item -Path "part*" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "XDumpGO.zip" -Force -ErrorAction SilentlyContinue
+          # Cleanup
+          Remove-Item -Path "part1", "part2", "XDumpGO.zip" -Force -ErrorAction SilentlyContinue
           
-          Write-Host "XDumpGO extracted to C:\XDumpGO"
+          # Verify extraction
+          Write-Host "Contents of C:\XDumpGO:"
+          Get-ChildItem -Path "C:\XDumpGO" -Recurse | Select-Object Name, Length | Format-Table
 
       - name: Create XDumpGO Auto-Run Script
         shell: pwsh
         run: |
-          # Create a PowerShell script to run XDumpGO automatically
+          # Create a PowerShell script that runs on RDP login
           $autoScript = @'
-          # Wait for user login (RDP session)
-          $maxWait = 300  # 5 minutes
-          $startTime = Get-Date
-          
-          Write-Host "Waiting for RDP session to start..."
-          
-          # Check for active console session
-          while (((Get-Date) - $startTime).TotalSeconds -lt $maxWait) {
-            $session = quser 2>$null | Where-Object { $_ -match 'rdp' -or $_ -match $env:RDP_USER }
-            if ($session) {
-              Write-Host "RDP session detected: $session"
-              break
-            }
-            Start-Sleep -Seconds 10
+          # Function to wait for RDP session
+          function Wait-ForRDPLogin {
+              $maxWait = 600  # 10 minutes maximum wait
+              $checkInterval = 10  # Check every 10 seconds
+              $startTime = Get-Date
+              
+              Write-Host "Waiting for RDP session to start..."
+              
+              while (((Get-Date) - $startTime).TotalSeconds -lt $maxWait) {
+                  try {
+                      $sessions = quser 2>$null
+                      if ($sessions -and $sessions -match $env:USERNAME) {
+                          Write-Host "RDP session detected for $env:USERNAME"
+                          return $true
+                      }
+                  } catch {
+                      # quser might fail if no sessions
+                  }
+                  Start-Sleep -Seconds $checkInterval
+              }
+              return $false
           }
           
-          # Wait a bit more for desktop to load
-          Start-Sleep -Seconds 30
-          
-          # Run XDumpGO
-          $xdumpgoPath = "C:\XDumpGO\XDumpGO.exe"
-          
-          if (Test-Path $xdumpgoPath) {
-            Write-Host "Starting XDumpGO..."
-            
-            # Run as current logged-in user
-            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
-            $processInfo.FileName = $xdumpgoPath
-            $processInfo.WorkingDirectory = "C:\XDumpGO"
-            $processInfo.UseShellExecute = $true
-            $processInfo.WindowStyle = "Normal"
-            
-            $process = [System.Diagnostics.Process]::Start($processInfo)
-            
-            Write-Host "XDumpGO started with PID: $($process.Id)"
-            
-            # Create desktop shortcut for easy access
-            $desktopPath = [Environment]::GetFolderPath("Desktop")
-            $shortcutPath = Join-Path $desktopPath "XDumpGO.lnk"
-            
-            $WshShell = New-Object -ComObject WScript.Shell
-            $Shortcut = $WshShell.CreateShortcut($shortcutPath)
-            $Shortcut.TargetPath = $xdumpgoPath
-            $Shortcut.WorkingDirectory = "C:\XDumpGO"
-            $Shortcut.Save()
-            
-            Write-Host "Desktop shortcut created: $shortcutPath"
-            
-            # Keep the script running to maintain XDumpGO
-            while ($true) {
-              if ($process.HasExited) {
-                Write-Host "XDumpGO closed. Restarting..."
-                $process = [System.Diagnostics.Process]::Start($processInfo)
+          # Wait for RDP login
+          if (Wait-ForRDPLogin) {
+              # Wait extra for desktop to fully load
+              Start-Sleep -Seconds 20
+              
+              # Check if XDumpGO exists
+              $xdumpgoPath = "C:\XDumpGO\XDumpGO.exe"
+              
+              if (Test-Path $xdumpgoPath) {
+                  Write-Host "Starting XDumpGO..."
+                  
+                  # Run XDumpGO with GUI
+                  $process = Start-Process -FilePath $xdumpgoPath `
+                    -WorkingDirectory "C:\XDumpGO" `
+                    -WindowStyle Normal `
+                    -PassThru
+                  
+                  Write-Host "XDumpGO started with PID: $($process.Id)"
+                  
+                  # Create desktop shortcut if not exists
+                  $desktop = [Environment]::GetFolderPath("Desktop")
+                  $shortcutPath = "$desktop\XDumpGO.lnk"
+                  
+                  if (-not (Test-Path $shortcutPath)) {
+                      $WshShell = New-Object -ComObject WScript.Shell
+                      $Shortcut = $WshShell.CreateShortcut($shortcutPath)
+                      $Shortcut.TargetPath = $xdumpgoPath
+                      $Shortcut.WorkingDirectory = "C:\XDumpGO"
+                      $Shortcut.Save()
+                      Write-Host "Desktop shortcut created"
+                  }
+                  
+                  # Monitor and restart if closed
+                  while ($true) {
+                      if ($process.HasExited) {
+                          Write-Host "XDumpGO closed. Restarting..."
+                          $process = Start-Process -FilePath $xdumpgoPath `
+                            -WorkingDirectory "C:\XDumpGO" `
+                            -WindowStyle Normal `
+                            -PassThru
+                          Write-Host "Restarted with PID: $($process.Id)"
+                      }
+                      Start-Sleep -Seconds 30
+                  }
+              } else {
+                  Write-Host "ERROR: XDumpGO.exe not found at $xdumpgoPath"
+                  # List what's in the folder
+                  Get-ChildItem -Path "C:\XDumpGO" -Recurse | Format-Table Name, Length
               }
-              Start-Sleep -Seconds 60
-            }
           } else {
-            Write-Host "ERROR: XDumpGO.exe not found at $xdumpgoPath"
-            Get-ChildItem -Path "C:\XDumpGO" -Recurse | Format-Table Name
+              Write-Host "No RDP session detected within timeout period."
           }
           '@
           
-          # Save to Startup folder for automatic run on login
+          # Save to Startup folder
           $startupPath = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp"
           New-Item -ItemType Directory -Path $startupPath -Force | Out-Null
-          $scriptPath = Join-Path $startupPath "StartXDumpGO.ps1"
           
+          $scriptPath = "$startupPath\StartXDumpGO.ps1"
           $autoScript | Out-File -FilePath $scriptPath -Encoding UTF8
           
-          # Create a batch file to run the PowerShell script
-          $batContent = @'
-          @echo off
-          powershell -ExecutionPolicy Bypass -File "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\StartXDumpGO.ps1"
-          '@
-          
-          $batPath = Join-Path $startupPath "StartXDumpGO.bat"
-          $batContent | Out-File -FilePath $batPath -Encoding ASCII
-          
-          Write-Host "Auto-run scripts created in Startup folder"
+          Write-Host "Auto-run script created: $scriptPath"
 
-      - name: Install Burp Suite Community (WINDOWS EXE)
+      - name: Install Burp Suite Community
         shell: pwsh
         run: |
           $url = "https://portswigger-cdn.net/burp/releases/download?product=community&version=2024.12.1&type=WindowsX64"
           $exe = "$env:TEMP\burpsuite.exe"
-
+          
           Invoke-WebRequest $url -OutFile $exe
           Start-Process $exe -ArgumentList "-q" -Wait
-
+          
           # Desktop shortcut
           $desktop = "C:\Users\Public\Desktop"
           $target = "C:\Program Files\BurpSuiteCommunity\BurpSuiteCommunity.exe"
-
+          
           $wsh = New-Object -ComObject WScript.Shell
-          $shortcut = $wsh.CreateShortcut("$desktop\Burp Suite Community.lnk")
+          $shortcut = $wsh.CreateShortcut("$desktop\Burp Suite.lnk")
           $shortcut.TargetPath = $target
           $shortcut.Save()
 
@@ -185,38 +185,38 @@ jobs:
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
             --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
             --hostname=gh-rdp-$env:GITHUB_RUN_ID
-
+          
           Start-Sleep 10
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
 
-      - name: Show RDP Details & Start XDumpGO Now
+      - name: Show RDP Details & Prepare XDumpGO
         shell: pwsh
         run: |
-          Write-Host "=============================="
-          Write-Host "RDP IP      : $env:TAILSCALE_IP"
-          Write-Host "USERNAME    : $env:RDP_USER"
-          Write-Host "PASSWORD    : $env:RDP_PASS"
-          Write-Host "=============================="
+          Write-Host "===================================="
+          Write-Host "       RDP CONNECTION DETAILS       "
+          Write-Host "===================================="
+          Write-Host "IP Address   : $env:TAILSCALE_IP"
+          Write-Host "Username     : $env:RDP_USER"
+          Write-Host "Password     : $env:RDP_PASS"
+          Write-Host "===================================="
           Write-Host ""
-          Write-Host "XDumpGO Location: C:\XDumpGO\XDumpGO.exe"
-          Write-Host "Auto-starts on RDP login"
+          Write-Host "XDumpGO Status:"
+          Write-Host "- Location: C:\XDumpGO\XDumpGO.exe"
+          Write-Host "- Auto-starts on RDP login"
+          Write-Host "- Desktop shortcut available"
           Write-Host ""
-          
-          # Try to start XDumpGO immediately (will run in background)
-          $xdumpgoExe = "C:\XDumpGO\XDumpGO.exe"
-          if (Test-Path $xdumpgoExe) {
-            Write-Host "Attempting to start XDumpGO now..."
-            try {
-              Start-Process -FilePath $xdumpgoExe -WindowStyle Minimized
-              Write-Host "XDumpGO started in background"
-            } catch {
-              Write-Host "Could not start XDumpGO now. Will auto-start on RDP login."
-            }
-          }
+          Write-Host "Instructions:"
+          Write-Host "1. Connect via RDP to: $env:TAILSCALE_IP"
+          Write-Host "2. Login with above credentials"
+          Write-Host "3. XDumpGO will auto-start"
+          Write-Host "4. If not, use desktop shortcut"
+          Write-Host "===================================="
           
           # Keep runner alive
+          $counter = 0
           while ($true) { 
-            Write-Host "Runner active - $(Get-Date -Format 'HH:mm:ss')"
-            Start-Sleep 300 
+              $counter++
+              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Runner active ($counter/∞) - RDP IP: $env:TAILSCALE_IP"
+              Start-Sleep 300 
           }
