@@ -36,35 +36,26 @@ jobs:
           Invoke-WebRequest https://www.7-zip.org/a/7z2407-x64.exe -OutFile $env:TEMP\7z.exe
           Start-Process $env:TEMP\7z.exe -ArgumentList "/S" -Wait
 
-      - name: Try MediaFire Auto Download
+      - name: MediaFire Download Attempt
         shell: pwsh
         run: |
           $url = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?download=1"
           $out = "C:\Users\Public\Desktop\XDumpGO.rar"
 
-          Write-Host "Trying MediaFire auto-download..."
           try {
             Start-BitsTransfer -Source $url -Destination $out -ErrorAction Stop
           } catch {
-            Write-Host "MediaFire blocked auto-download"
+            Write-Host "MediaFire blocked auto download"
           }
 
           if (!(Test-Path $out)) {
-            $text = @"
-MANUAL DOWNLOAD REQUIRED
-
-1. Open browser in RDP
-2. Go to:
-https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file
-3. Click DOWNLOAD
-4. Save to Desktop
-5. Extract using 7-Zip
-6. Run XDumpGO.exe
-
-MediaFire blocks automation. This is normal.
-"@
-
-            $text | Out-File "C:\Users\Public\Desktop\READ_ME_DOWNLOAD.txt" -Encoding UTF8
+            New-Item -Path "C:\Users\Public\Desktop\READ_ME_DOWNLOAD.txt" -ItemType File -Force | Out-Null
+            Add-Content "C:\Users\Public\Desktop\READ_ME_DOWNLOAD.txt" "MANUAL DOWNLOAD REQUIRED"
+            Add-Content "C:\Users\Public\Desktop\READ_ME_DOWNLOAD.txt" "1. Open browser in RDP"
+            Add-Content "C:\Users\Public\Desktop\READ_ME_DOWNLOAD.txt" "2. Go to MediaFire link"
+            Add-Content "C:\Users\Public\Desktop\READ_ME_DOWNLOAD.txt" "3. Download XDumpGO.rar"
+            Add-Content "C:\Users\Public\Desktop\READ_ME_DOWNLOAD.txt" "4. Extract with 7-Zip"
+            Add-Content "C:\Users\Public\Desktop\READ_ME_DOWNLOAD.txt" "5. Run XDumpGO.exe"
           }
 
       - name: Prepare Desktop Folder
@@ -81,7 +72,7 @@ MediaFire blocks automation. This is normal.
       - name: Connect Tailscale
         shell: pwsh
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp-$env:GITHUB_RUN_ID
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="gh-rdp-$env:GITHUB_RUN_ID"
           Start-Sleep 10
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           "TAILSCALE_IP=$ip" | Out-File -Append $env:GITHUB_ENV
@@ -94,9 +85,7 @@ MediaFire blocks automation. This is normal.
           Write-Host "IP   : $env:TAILSCALE_IP"
           Write-Host "USER : $env:RDP_USER"
           Write-Host "PASS : $env:RDP_PASS"
-          Write-Host "------------------------------------"
-          Write-Host "If XDumpGO.rar not found:"
-          Write-Host "Read READ_ME_DOWNLOAD.txt on Desktop"
+          Write-Host "Check Desktop for READ_ME_DOWNLOAD.txt"
           Write-Host "===================================="
 
           while ($true) {
