@@ -34,38 +34,22 @@ jobs:
       - name: Install 7-Zip for RAR extraction
         shell: pwsh
         run: |
-          # Download and install 7-Zip
           $7zUrl = "https://www.7-zip.org/a/7z2407-x64.exe"
           $7zPath = "$env:TEMP\7z.exe"
-          
           Invoke-WebRequest -Uri $7zUrl -OutFile $7zPath
           Start-Process -FilePath $7zPath -ArgumentList "/S" -Wait
-          
           Write-Host "7-Zip installed successfully"
 
       - name: Download XDumpGO RAR from MediaFire
         shell: pwsh
         run: |
-          # MediaFire download URL
-          $mediafireUrl = "https://download2264.mediafire.com/m6jgrzle2lveqe2/x10g5we6bis/XDumpGO.rar"
-          
-          # Try direct download link pattern
+          $mediafireUrl = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279"
           Write-Host "Downloading XDumpGO RAR from MediaFire..."
           $rarPath = "C:\XDumpGO.rar"
           
           try {
-              # Try direct download
-              Invoke-WebRequest -Uri $mediafireUrl -OutFile $rarPath
-          } catch {
-              Write-Host "Direct download failed, trying alternative method..."
+              $pageContent = Invoke-WebRequest -Uri $mediafireUrl -UseBasicParsing
               
-              # Alternative: Use your original page URL
-              $pageUrl = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279"
-              
-              # Download the page and extract download link
-              $pageContent = Invoke-WebRequest -Uri $pageUrl -UseBasicParsing
-              
-              # Try to find download link in page
               if ($pageContent.Content -match 'href="(https://download[^"]+\.rar)"') {
                   $downloadUrl = $matches[1]
                   Write-Host "Found download URL: $downloadUrl"
@@ -73,21 +57,16 @@ jobs:
               } else {
                   Write-Host "Could not extract download link. Creating manual download instructions..."
                   
-                  # Create instructions file
-                  $instructions = @"
-XDumpGO Download Instructions:
-1. Open browser in RDP
-2. Go to: https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279
-3. Click download
-4. Save to C:\XDumpGO.rar
-5. Extract using 7-Zip
-"@
+                  $instructions = "XDumpGO Download Instructions:`n1. Open browser in RDP`n2. Go to: https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279`n3. Click download`n4. Save to C:\XDumpGO.rar`n5. Extract using 7-Zip"
+                  
                   $instructions | Out-File "C:\Users\Public\Desktop\Download_XDumpGO.txt" -Encoding UTF8
                   throw "Automatic download failed. Manual download required."
               }
+          } catch {
+              Write-Host "Error: $_"
+              throw "Download failed"
           }
           
-          # Verify download
           if (Test-Path $rarPath) {
               $fileSize = (Get-Item $rarPath).Length
               Write-Host "✅ Download successful: $fileSize bytes"
@@ -103,20 +82,10 @@ XDumpGO Download Instructions:
           
           if (Test-Path $rarPath) {
               Write-Host "Extracting RAR file using 7-Zip..."
-              
-              # Create extraction directory
               New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
-              
-              # Extract using 7-Zip command line
               & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
-              
               Write-Host "Extraction complete!"
-              
-              # List extracted files
-              Write-Host "Extracted files:"
               Get-ChildItem $extractPath | Select-Object Name, Length | Format-Table
-              
-              # Cleanup RAR file
               Remove-Item $rarPath -Force
           } else {
               Write-Host "RAR file not found. Skipping extraction."
@@ -129,26 +98,20 @@ XDumpGO Download Instructions:
           
           if (Test-Path $xdumpgoPath) {
               Write-Host "🚀 Starting XDumpGO..."
-              
-              # Start application
               Start-Process -FilePath $xdumpgoPath -WindowStyle Normal
               
-              # Create desktop shortcut
               $WshShell = New-Object -ComObject WScript.Shell
               $Shortcut = $WshShell.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
               $Shortcut.TargetPath = $xdumpgoPath
               $Shortcut.WorkingDirectory = "C:\XDumpGO"
               $Shortcut.Save()
               
-              # Add to startup
               reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v XDumpGO /t REG_SZ /d "`"$xdumpgoPath`"" /f
-              
               Write-Host "✅ XDumpGO started and configured"
           } else {
               Write-Host "⚠️ XDumpGO.exe not found. Checking folder:"
               Get-ChildItem "C:\XDumpGO" -Recurse | Where-Object { $_.Name -like "*.exe" } | Select-Object Name, FullName | Format-Table
               
-              # Try to find any executable
               $exeFiles = Get-ChildItem "C:\XDumpGO" -Recurse -Filter "*.exe" | Select-Object -First 1
               if ($exeFiles) {
                   Write-Host "Found executable: $($exeFiles.FullName)"
@@ -187,7 +150,6 @@ XDumpGO Download Instructions:
           Write-Host "------------------------------------------"
           Write-Host "XDumpGO Status :"
           
-          # Check if XDumpGO is running
           $process = Get-Process | Where-Object { $_.Path -like "*XDumpGO*" }
           if ($process) {
               Write-Host "- ✅ Running (PID: $($process.Id))"
@@ -204,7 +166,6 @@ XDumpGO Download Instructions:
           Write-Host "3. XDumpGO should be on desktop"
           Write-Host "=========================================="
           
-          # Keep runner alive
           $counter = 0
           while ($true) { 
               $counter++
