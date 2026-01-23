@@ -121,7 +121,6 @@ jobs:
       - name: Setup XDumpGO Auto-Start
         shell: pwsh
         run: |
-          # Correct path based on your error message
           $xdumpgoPath = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
           
           Write-Host "Checking for XDumpGO at: $xdumpgoPath"
@@ -154,33 +153,29 @@ jobs:
           } else {
               Write-Host "❌ XDumpGO.exe not found. Searching..."
               
-              # Search for it
               $foundFiles = Get-ChildItem "C:\" -Filter "XDumpGO.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 5
               if ($foundFiles) {
                   Write-Host "Found XDumpGO.exe in these locations:"
                   $foundFiles | Select-Object FullName | Format-Table
                   
-                  # Use the first found
                   $actualPath = $foundFiles[0].FullName
                   Write-Host "Using: $actualPath"
                   
-                  # Create shortcut to actual location
                   $WshShell = New-Object -ComObject WScript.Shell
                   $Shortcut = $WshShell.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
                   $Shortcut.TargetPath = $actualPath
                   $Shortcut.WorkingDirectory = Split-Path $actualPath -Parent
                   $Shortcut.Save()
               } else {
-                  Write-Host "No XDumpGO.exe found anywhere"
+                  Write-Host "No XDumpGO.exe found"
               }
           }
 
       - name: Simple XDumpGO Starter
         shell: pwsh
         run: |
-          Write-Host "Setting up XDumpGO starter..."
+          Write-Host "Setting up XDumpGO starter"
           
-          # Create a simple batch file to start XDumpGO
           $starterScript = @'
 @echo off
 echo Starting XDumpGO...
@@ -191,7 +186,7 @@ pause
 '@
           
           $starterScript | Out-File "C:\Users\Public\Desktop\Start_XDumpGO.bat" -Encoding ASCII
-          Write-Host "Created starter batch file on desktop"
+          Write-Host "Created starter batch file"
 
       - name: Install Tailscale
         shell: pwsh
@@ -199,7 +194,7 @@ pause
           Write-Host "Installing Tailscale..."
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $path = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest $url -OutFile $path
+          Invoke-WebRequest -Uri $url -OutFile $path
           Start-Process msiexec.exe -ArgumentList "/i `"$path`" /quiet /norestart" -Wait
 
       - name: Connect Tailscale
@@ -227,7 +222,6 @@ pause
           Write-Host "------------------------------------------"
           Write-Host "XDumpGO Setup:"
           
-          # Check for XDumpGO
           $xdumpgoPath1 = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
           $xdumpgoPath2 = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO\XDumpGO.exe"
           
@@ -249,7 +243,6 @@ pause
           Write-Host "4. Or run Start_XDumpGO.bat on desktop"
           Write-Host "=========================================="
           
-          # Keep alive
           $counter = 0
           while ($true) { 
               $counter++
