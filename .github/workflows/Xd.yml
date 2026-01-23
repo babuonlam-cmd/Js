@@ -246,8 +246,8 @@ Write-Host "`nIf XDumpGO is not found, try re-running the installation."
           
           # Connect to Tailscale
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
-            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
-            --hostname=$hostname `
+            --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" `
+            --hostname="$hostname" `
             --accept-routes=true `
             --accept-dns=true `
             --shields-up=false `
