@@ -80,43 +80,34 @@ jobs:
           if (Test-Path $xdumpgoPath) {
               Write-Host "🚀 Direct starting XDumpGO (no login required)..."
               
-              # Method 1: Simple start
-              Start-Process -FilePath $xdumpgoPath -WindowStyle Normal -PassThru
+              # Simple start
+              Start-Process -FilePath $xdumpgoPath -WindowStyle Normal
               
-              # Method 2: As a background service
-              $serviceScript = @'
-              $process = Start-Process "C:\XDumpGO\XDumpGO.exe" -WindowStyle Normal -PassThru
-              while($true) {
-                  if ($process.HasExited) {
-                      Write-Host "XDumpGO closed. Restarting..."
-                      $process = Start-Process "C:\XDumpGO\XDumpGO.exe" -WindowStyle Normal -PassThru
-                  }
-                  Start-Sleep -Seconds 30
-              }
-              '@
+              # Wait and verify
+              Start-Sleep -Seconds 5
               
-              # Run as background job
-              $job = Start-Job -ScriptBlock {
-                  Start-Process "C:\XDumpGO\XDumpGO.exe" -WindowStyle Normal
-              }
-              
-              Write-Host "✅ XDumpGO started directly as background process"
-              Write-Host "Process ID: $(Get-Process XDumpGO -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)"
-              
-              # Verify it's running
-              Start-Sleep -Seconds 10
-              $process = Get-Process | Where-Object {$_.ProcessName -like "*XDumpGO*"}
+              # Check if running
+              $process = Get-Process | Where-Object {$_.Name -eq "XDumpGO" -or $_.MainWindowTitle -like "*XDumpGO*"}
               if ($process) {
-                  Write-Host "✅ XDumpGO is running with PID: $($process.Id)"
+                  Write-Host "✅ XDumpGO started with PID: $($process.Id)"
               } else {
-                  Write-Host "⚠️ XDumpGO might need GUI session. Creating startup script instead..."
+                  Write-Host "⚠️ XDumpGO process not found by name, checking all processes..."
+                  # Alternative check
+                  $allProcesses = Get-Process | Where-Object {$_.Path -like "*XDumpGO*"} | Select-Object -First 1
+                  if ($allProcesses) {
+                      Write-Host "✅ XDumpGO found with PID: $($allProcesses.Id)"
+                  } else {
+                      Write-Host "⚠️ XDumpGO might be running without visible process name"
+                  }
               }
               
           } else {
               Write-Host "❌ XDumpGO.exe not found at $xdumpgoPath"
+              Write-Host "Checking C:\XDumpGO directory:"
+              Get-ChildItem "C:\XDumpGO" | Format-Table Name, Length
           }
           
-          # Create desktop shortcut for RDP user (optional)
+          # Create desktop shortcut
           $WshShell = New-Object -ComObject WScript.Shell
           $Shortcut = $WshShell.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
           $Shortcut.TargetPath = "C:\XDumpGO\XDumpGO.exe"
@@ -156,33 +147,42 @@ jobs:
           Write-Host "-----------------------------------------"
           Write-Host "XDumpGO Status:"
           
-          # Check if XDumpGO is running
-          $xdumpgoProcess = Get-Process | Where-Object {$_.ProcessName -like "*XDumpGO*"}
-          if ($xdumpgoProcess) {
-              Write-Host "✅ RUNNING - PID: $($xdumpgoProcess.Id)"
+          # Try to find and start XDumpGO
+          $xdumpgoExe = "C:\XDumpGO\XDumpGO.exe"
+          
+          if (Test-Path $xdumpgoExe) {
+              Write-Host "✅ Executable found: $xdumpgoExe"
+              
+              # Check if already running
+              $processes = Get-Process | Where-Object {$_.Path -like "*XDumpGO*"}
+              
+              if ($processes) {
+                  Write-Host "✅ Already running - PID: $($processes[0].Id)"
+              } else {
+                  Write-Host "⚠️ Not running, attempting to start..."
+                  Start-Process -FilePath $xdumpgoExe -WindowStyle Minimized
+                  Start-Sleep -Seconds 3
+                  
+                  # Check again
+                  $newProcess = Get-Process | Where-Object {$_.Path -like "*XDumpGO*"}
+                  if ($newProcess) {
+                      Write-Host "✅ Started with PID: $($newProcess[0].Id)"
+                  } else {
+                      Write-Host "❌ Could not start. Might require GUI session."
+                  }
+              }
           } else {
-              Write-Host "⚠️ NOT RUNNING - Will start on RDP login"
-              # Try to start again
-              Start-Process "C:\XDumpGO\XDumpGO.exe" -WindowStyle Minimized -ErrorAction SilentlyContinue
+              Write-Host "❌ XDumpGO.exe not found!"
           }
           
           Write-Host "Location     : C:\XDumpGO\XDumpGO.exe"
           Write-Host "========================================="
           
-          # Keep checking and restart if needed
+          # Simple keep-alive loop
           $counter = 0
           while ($true) { 
               $counter++
-              $process = Get-Process | Where-Object {$_.ProcessName -like "*XDumpGO*"}
-              $status = if ($process) { "✅ RUNNING (PID: $($process.Id))" } else { "❌ STOPPED" }
-              
-              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Check #$counter - XDumpGO: $status"
-              
-              # If not running, try to restart
-              if (-not $process) {
-                  Write-Host "Attempting to restart XDumpGO..."
-                  Start-Process "C:\XDumpGO\XDumpGO.exe" -WindowStyle Minimized -ErrorAction SilentlyContinue
-              }
-              
+              $currentTime = Get-Date -Format "HH:mm:ss"
+              Write-Host "[$currentTime] Check #$counter - RDP IP: $env:TAILSCALE_IP"
               Start-Sleep 30 
           }
