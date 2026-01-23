@@ -130,25 +130,17 @@ jobs:
               # Delete existing task if any
               schtasks /delete /tn "$taskName" /f 2>$null
               
-              # Create new task
-              $action = New-ScheduledTaskAction -Execute $xdumpgoPath
-              $trigger1 = New-ScheduledTaskTrigger -AtStartup
-              $trigger2 = New-ScheduledTaskTrigger -AtLogOn -User "RDP"
-              $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-              $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-              
-              $task = New-ScheduledTask -Action $action -Trigger $trigger1, $trigger2 -Settings $settings -Principal $principal -Description $taskDescription
-              Register-ScheduledTask -TaskName "$taskName" -InputObject $task -Force
+              # Create new task using schtasks command
+              $taskCommand = "schtasks /create /tn `"$taskName`" /tr `"$xdumpgoPath`" /sc onlogon /ru `"RDP`" /rl highest /f"
+              Invoke-Expression $taskCommand
               
               # 5. Create batch file for auto-restart
               Write-Host "🔄 Creating auto-restart script..."
-              $restartScript = @'
-@echo off
+              $restartScript = '@echo off
 :start
 "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
 timeout /t 10
-goto start
-'@
+goto start'
               
               $restartScript | Out-File "C:\Users\Public\Desktop\AutoStart_XDumpGO.bat" -Encoding ASCII
               
@@ -159,7 +151,7 @@ goto start
               Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse | Where-Object { $_.Name -like "*.exe" } | Select-Object Name, FullName | Format-Table
           }
 
-      - name: Monitor and Keep XDumpGO Running
+      - name: Monitor XDumpGO
         shell: pwsh
         run: |
           Write-Host "👁️ Monitoring XDumpGO..."
