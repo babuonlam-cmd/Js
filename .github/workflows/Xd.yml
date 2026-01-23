@@ -99,36 +99,101 @@ jobs:
               Write-Host "RAR file not found. Skipping extraction."
           }
 
-      - name: Start XDumpGO from Desktop
+      - name: Auto Start XDumpGO Setup
         shell: pwsh
         run: |
           $xdumpgoPath = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
           
           if (Test-Path $xdumpgoPath) {
-              Write-Host "🚀 Starting XDumpGO from Desktop..."
+              Write-Host "⚙️ Setting up XDumpGO auto-start..."
+              
+              # 1. Start XDumpGO immediately
+              Write-Host "🚀 Starting XDumpGO now..."
               Start-Process -FilePath $xdumpgoPath -WindowStyle Normal
               
-              # Create additional shortcut (optional)
+              # 2. Create shortcut on public desktop
               $WshShell = New-Object -ComObject WScript.Shell
               $Shortcut = $WshShell.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
               $Shortcut.TargetPath = $xdumpgoPath
               $Shortcut.WorkingDirectory = "C:\Users\RDP\Desktop\XDumpGO"
               $Shortcut.Save()
               
-              # Add to startup
-              reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v XDumpGO /t REG_SZ /d "`"$xdumpgoPath`"" /f
+              # 3. Add to Windows Startup (Registry)
+              Write-Host "📝 Adding to Windows Startup..."
+              reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v XDumpGO /t REG_SZ /d "`"$xdumpgoPath`"" /f
               
-              Write-Host "✅ XDumpGO started from Desktop"
+              # 4. Create Scheduled Task for auto-start
+              Write-Host "⏰ Creating Scheduled Task..."
+              $taskName = "XDumpGO AutoStart"
+              $taskDescription = "Automatically starts XDumpGO on system boot and user login"
+              
+              # Delete existing task if any
+              schtasks /delete /tn "$taskName" /f 2>$null
+              
+              # Create new task
+              $action = New-ScheduledTaskAction -Execute $xdumpgoPath
+              $trigger1 = New-ScheduledTaskTrigger -AtStartup
+              $trigger2 = New-ScheduledTaskTrigger -AtLogOn -User "RDP"
+              $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+              $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+              
+              $task = New-ScheduledTask -Action $action -Trigger $trigger1, $trigger2 -Settings $settings -Principal $principal -Description $taskDescription
+              Register-ScheduledTask -TaskName "$taskName" -InputObject $task -Force
+              
+              # 5. Create batch file for auto-restart
+              Write-Host "🔄 Creating auto-restart script..."
+              $restartScript = @'
+@echo off
+:start
+"C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
+timeout /t 10
+goto start
+'@
+              
+              $restartScript | Out-File "C:\Users\Public\Desktop\AutoStart_XDumpGO.bat" -Encoding ASCII
+              
+              Write-Host "✅ Auto-start setup complete!"
+              
           } else {
               Write-Host "⚠️ XDumpGO.exe not found on Desktop. Checking folder:"
               Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse | Where-Object { $_.Name -like "*.exe" } | Select-Object Name, FullName | Format-Table
-              
-              # Try to find any executable
-              $exeFiles = Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse -Filter "*.exe" | Select-Object -First 1
-              if ($exeFiles) {
-                  Write-Host "Found executable: $($exeFiles.FullName)"
-                  Start-Process -FilePath $exeFiles.FullName
+          }
+
+      - name: Monitor and Keep XDumpGO Running
+        shell: pwsh
+        run: |
+          Write-Host "👁️ Monitoring XDumpGO..."
+          
+          # Function to start XDumpGO
+          function Start-XDumpGO {
+              $path = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
+              if (Test-Path $path) {
+                  Start-Process -FilePath $path -WindowStyle Minimized -ErrorAction SilentlyContinue
+                  return $true
               }
+              return $false
+          }
+          
+          # Start initially
+          Start-XDumpGO
+          
+          # Monitor loop
+          $checkCount = 0
+          while ($true) {
+              $checkCount++
+              $currentTime = Get-Date -Format "HH:mm:ss"
+              
+              # Check if XDumpGO is running
+              $process = Get-Process | Where-Object { $_.Name -like "*XDumpGO*" -or $_.Path -like "*XDumpGO*" }
+              
+              if ($process) {
+                  Write-Host "[$currentTime] ✅ XDumpGO running (PID: $($process.Id)) - Check #$checkCount"
+              } else {
+                  Write-Host "[$currentTime] ⚠️ XDumpGO not found - Attempting to restart..."
+                  Start-XDumpGO
+              }
+              
+              Start-Sleep -Seconds 30
           }
 
       - name: Install Tailscale
@@ -164,23 +229,37 @@ jobs:
           
           $process = Get-Process | Where-Object { $_.Path -like "*XDumpGO*" }
           if ($process) {
-              Write-Host "- ✅ Running (PID: $($process.Id))"
+              Write-Host "- ✅ AUTO-RUNNING (PID: $($process.Id))"
           } else {
-              Write-Host "- ⚠️ Not running - will start on RDP login"
+              Write-Host "- ⚠️ Not running - Auto-start configured"
           }
           
           Write-Host "- 📁 Location: C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
-          Write-Host "- 🔗 Desktop folder: XDumpGO"
+          Write-Host "- 🔗 Auto-start: Enabled (Registry + Task Scheduler)"
+          Write-Host "- 🔄 Auto-restart: Enabled"
+          Write-Host "- 📋 Desktop shortcut available"
+          Write-Host "------------------------------------------"
+          Write-Host "Auto-start Features:"
+          Write-Host "1. Started immediately"
+          Write-Host "2. Auto-starts on Windows boot"
+          Write-Host "3. Auto-starts on RDP login"
+          Write-Host "4. Auto-restart if closed"
+          Write-Host "5. Continuous monitoring"
           Write-Host "------------------------------------------"
           Write-Host "Instructions:"
           Write-Host "1. Connect via RDP to: $env:TAILSCALE_IP"
           Write-Host "2. Login with above credentials"
-          Write-Host "3. Look for XDumpGO folder on desktop"
+          Write-Host "3. XDumpGO will already be running"
           Write-Host "=========================================="
           
+          # Keep showing status
           $counter = 0
           while ($true) { 
               $counter++
-              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Runner active - $counter/∞ - IP: $env:TAILSCALE_IP"
-              Start-Sleep 300 
+              $time = Get-Date -Format "HH:mm:ss"
+              $process = Get-Process | Where-Object { $_.Path -like "*XDumpGO*" }
+              $status = if ($process) { "✅ RUNNING (PID: $($process.Id))" } else { "❌ STOPPED" }
+              
+              Write-Host "[$time] Status #$counter: XDumpGO $status | RDP IP: $env:TAILSCALE_IP"
+              Start-Sleep 60
           }
