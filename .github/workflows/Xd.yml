@@ -1,4 +1,4 @@
-name: RDPXD 
+name: RDPXD
 
 on:
   workflow_dispatch:
@@ -31,113 +31,56 @@ jobs:
           echo "RDP_USER=$user" >> $env:GITHUB_ENV
           echo "RDP_PASS=$pass" >> $env:GITHUB_ENV
 
-      - name: Install 7-Zip for RAR extraction
+      - name: Install 7-Zip
         shell: pwsh
         run: |
-          $7zUrl = "https://www.7-zip.org/a/7z2407-x64.exe"
-          $7zPath = "$env:TEMP\7z.exe"
-          Invoke-WebRequest -Uri $7zUrl -OutFile $7zPath
-          Start-Process -FilePath $7zPath -ArgumentList "/S" -Wait
-          Write-Host "7-Zip installed successfully"
+          Invoke-WebRequest https://www.7-zip.org/a/7z2407-x64.exe -OutFile $env:TEMP\7z.exe
+          Start-Process $env:TEMP\7z.exe -ArgumentList "/S" -Wait
 
-      - name: Download XDumpGO RAR from MediaFire
+      - name: Try MediaFire Auto Download
         shell: pwsh
         run: |
-          $mediafireUrl = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279"
-          Write-Host "Downloading XDumpGO RAR from MediaFire..."
-          $rarPath = "C:\Users\Public\Desktop\XDumpGO.rar"
-          
+          $url = "https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?download=1"
+          $out = "C:\Users\Public\Desktop\XDumpGO.rar"
+
+          Write-Host "Trying MediaFire auto-download..."
           try {
-              $pageContent = Invoke-WebRequest -Uri $mediafireUrl -UseBasicParsing
-              
-              if ($pageContent.Content -match 'href="(https://download[^"]+\.rar)"') {
-                  $downloadUrl = $matches[1]
-                  Write-Host "Found download URL: $downloadUrl"
-                  Invoke-WebRequest -Uri $downloadUrl -OutFile $rarPath
-              } else {
-                  Write-Host "Could not extract download link. Creating manual download instructions..."
-                  
-                  $instructions = "XDumpGO Download Instructions:`n1. Open browser in RDP`n2. Go to: https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file?dkey=x10g5we6bis&r=1279`n3. Click download`n4. Save to Desktop`n5. Extract using 7-Zip"
-                  
-                  $instructions | Out-File "C:\Users\Public\Desktop\Download_XDumpGO.txt" -Encoding UTF8
-                  throw "Automatic download failed. Manual download required."
-              }
+            Start-BitsTransfer -Source $url -Destination $out -ErrorAction Stop
           } catch {
-              Write-Host "Error: $_"
-              throw "Download failed"
-          }
-          
-          if (Test-Path $rarPath) {
-              $fileSize = (Get-Item $rarPath).Length
-              Write-Host "✅ Download successful: $fileSize bytes"
-          } else {
-              throw "❌ Download failed: File not found"
+            Write-Host "Auto download blocked by MediaFire"
           }
 
-      - name: Extract XDumpGO to Desktop
-        shell: pwsh
-        run: |
-          $rarPath = "C:\Users\Public\Desktop\XDumpGO.rar"
-          $extractPath = "C:\Users\RDP\Desktop\XDumpGO"
-          
-          # Create RDP user desktop folder
-          New-Item -ItemType Directory -Path "C:\Users\RDP\Desktop" -Force | Out-Null
-          
-          if (Test-Path $rarPath) {
-              Write-Host "Extracting XDumpGO to Desktop..."
-              New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
-              & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
-              Write-Host "Extraction complete!"
-              
-              # List extracted files
-              Write-Host "Files on Desktop:"
-              Get-ChildItem $extractPath | Select-Object Name, Length | Format-Table
-              
-              # Cleanup RAR file
-              Remove-Item $rarPath -Force
+          if (Test-Path $out) {
+            Write-Host "Auto download successful"
           } else {
-              Write-Host "RAR file not found. Skipping extraction."
+            Write-Host "Creating manual download instructions..."
+            @"
+MANUAL DOWNLOAD REQUIRED
+
+1. Open browser in RDP
+2. Go to:
+https://www.mediafire.com/file/m6jgrzle2lveqe2/XDumpGO.rar/file
+3. Click DOWNLOAD
+4. Save to Desktop
+5. Extract using 7-Zip
+6. Run XDumpGO.exe
+
+NOTE:
+MediaFire blocks automation. This is normal.
+"@ | Out-File "C:\Users\Public\Desktop\READ_ME_DOWNLOAD.txt" -Encoding UTF8
           }
 
-      - name: Start XDumpGO from Desktop
+      - name: Prepare Desktop Folder
         shell: pwsh
         run: |
-          $xdumpgoPath = "C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
-          
-          if (Test-Path $xdumpgoPath) {
-              Write-Host "🚀 Starting XDumpGO from Desktop..."
-              Start-Process -FilePath $xdumpgoPath -WindowStyle Normal
-              
-              # Create additional shortcut (optional)
-              $WshShell = New-Object -ComObject WScript.Shell
-              $Shortcut = $WshShell.CreateShortcut("C:\Users\Public\Desktop\XDumpGO.lnk")
-              $Shortcut.TargetPath = $xdumpgoPath
-              $Shortcut.WorkingDirectory = "C:\Users\RDP\Desktop\XDumpGO"
-              $Shortcut.Save()
-              
-              # Add to startup
-              reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v XDumpGO /t REG_SZ /d "`"$xdumpgoPath`"" /f
-              
-              Write-Host "✅ XDumpGO started from Desktop"
-          } else {
-              Write-Host "⚠️ XDumpGO.exe not found on Desktop. Checking folder:"
-              Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse | Where-Object { $_.Name -like "*.exe" } | Select-Object Name, FullName | Format-Table
-              
-              # Try to find any executable
-              $exeFiles = Get-ChildItem "C:\Users\RDP\Desktop\XDumpGO" -Recurse -Filter "*.exe" | Select-Object -First 1
-              if ($exeFiles) {
-                  Write-Host "Found executable: $($exeFiles.FullName)"
-                  Start-Process -FilePath $exeFiles.FullName
-              }
-          }
+          New-Item -ItemType Directory -Path "C:\Users\RDP\Desktop\XDumpGO" -Force | Out-Null
 
       - name: Install Tailscale
         shell: pwsh
         run: |
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $path = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest $url -OutFile $path
-          Start-Process msiexec.exe -ArgumentList "/i `"$path`" /quiet /norestart" -Wait
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi `
+            -OutFile $env:TEMP\tailscale.msi
+          Start-Process msiexec.exe -ArgumentList "/i `"$env:TEMP\tailscale.msi`" /quiet /norestart" -Wait
 
       - name: Connect Tailscale
         shell: pwsh
@@ -145,7 +88,7 @@ jobs:
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
             --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
             --hostname=gh-rdp-$env:GITHUB_RUN_ID
-          
+
           Start-Sleep 10
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
@@ -153,34 +96,18 @@ jobs:
       - name: Show RDP Details
         shell: pwsh
         run: |
-          Write-Host "=========================================="
-          Write-Host "           RDP ACCESS READY               "
-          Write-Host "=========================================="
-          Write-Host "RDP IP Address : $env:TAILSCALE_IP"
-          Write-Host "Username       : $env:RDP_USER"
-          Write-Host "Password       : $env:RDP_PASS"
-          Write-Host "------------------------------------------"
-          Write-Host "XDumpGO Status :"
-          
-          $process = Get-Process | Where-Object { $_.Path -like "*XDumpGO*" }
-          if ($process) {
-              Write-Host "- ✅ Running (PID: $($process.Id))"
-          } else {
-              Write-Host "- ⚠️ Not running - will start on RDP login"
-          }
-          
-          Write-Host "- 📁 Location: C:\Users\RDP\Desktop\XDumpGO\XDumpGO.exe"
-          Write-Host "- 🔗 Desktop folder: XDumpGO"
-          Write-Host "------------------------------------------"
-          Write-Host "Instructions:"
-          Write-Host "1. Connect via RDP to: $env:TAILSCALE_IP"
-          Write-Host "2. Login with above credentials"
-          Write-Host "3. Look for XDumpGO folder on desktop"
-          Write-Host "=========================================="
-          
-          $counter = 0
-          while ($true) { 
-              $counter++
-              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Runner active - $counter/∞ - IP: $env:TAILSCALE_IP"
-              Start-Sleep 300 
+          Write-Host "===================================="
+          Write-Host "RDP READY"
+          Write-Host "IP       : $env:TAILSCALE_IP"
+          Write-Host "USER     : $env:RDP_USER"
+          Write-Host "PASS     : $env:RDP_PASS"
+          Write-Host "------------------------------------"
+          Write-Host "If XDumpGO.rar not found:"
+          Write-Host "- Open Desktop"
+          Write-Host "- Read READ_ME_DOWNLOAD.txt"
+          Write-Host "- Download manually via browser"
+          Write-Host "===================================="
+
+          while ($true) {
+            Start-Sleep 300
           }
